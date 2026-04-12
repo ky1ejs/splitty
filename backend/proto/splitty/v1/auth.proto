@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package splitty.v1;
+
+service AuthService {
+  rpc SignInWithApple(SignInWithAppleRequest) returns (AuthResponse);
+  rpc SendPasscode(SendPasscodeRequest) returns (SendPasscodeResponse);
+  rpc VerifyPasscode(VerifyPasscodeRequest) returns (AuthResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (AuthResponse);
+}
+
+message SignInWithAppleRequest {
+  string identity_token = 1;
+}
+
+message SendPasscodeRequest {
+  string email = 1;
+}
+
+message SendPasscodeResponse {}
+
+message VerifyPasscodeRequest {
+  string email = 1;
+  string code = 2;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  User user = 3;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+}
