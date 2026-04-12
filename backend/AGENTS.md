@@ -14,6 +14,9 @@ Go + gRPC backend for the Splitty expense-splitting app.
 # Start local Postgres
 make docker-up
 
+# Create the splitty_dev database (first time only)
+make db-create
+
 # Generate proto stubs (required before first build)
 make proto-gen
 
@@ -43,7 +46,6 @@ backend/
   proto/splitty/v1/   # Protobuf definitions
   buf.yaml            # buf module config
   buf.gen.yaml        # buf code generation config
-  docker-compose.yml  # Local Postgres
 ```
 
 ## Configuration
@@ -56,7 +58,7 @@ Environment variables:
 | `DATABASE_URL` | Postgres connection string | — |
 | `JWT_PRIVATE_KEY` | RSA private key for JWT signing | — |
 
-Local Postgres URL: `postgres://splitty:splitty@localhost:5432/splitty_dev?sslmode=disable`
+Local Postgres URL: `postgres://postgres@localhost:5432/splitty_dev?sslmode=disable`
 
 ## Protobuf
 

@@ -1,13 +1,17 @@
-.PHONY: proto-gen docker-up docker-down run test
+.PHONY: proto-gen docker-up docker-down db-create run test
 
 proto-gen:
 	cd backend && buf generate
 
 docker-up:
-	cd backend && docker compose up -d
+	docker compose up -d
 
 docker-down:
-	cd backend && docker compose down
+	docker compose down
+
+db-create:
+	@docker exec -i $$(docker compose ps -q postgres) psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'splitty_dev'" | grep -q 1 || \
+		docker exec -i $$(docker compose ps -q postgres) createdb -U postgres splitty_dev
 
 run:
 	cd backend && go run ./cmd/server
