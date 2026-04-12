@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Ensure .claude directory exists (it's not tracked in git)
+mkdir -p .claude
+
+# Symlink Claude settings from main repo so the agent has correct permissions
+ln -sf "$ORCA_REPO_ROOT/.claude/settings.local.json" .claude/settings.local.json
