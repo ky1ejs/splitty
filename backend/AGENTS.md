@@ -67,3 +67,7 @@ make proto-gen
 ```
 
 This runs `buf generate` and outputs Go code to `gen/splitty/v1/`.
+
+## Workflow
+- Write tests for new features and bug fixes
+- Run tests before creating a PR and before pushing changes to a PR

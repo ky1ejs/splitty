@@ -38,4 +38,4 @@ See ./DEPS.md
 # Workflow
 - Create tests to verify your changes
 - Use `/simplify` after every session to simplify your code and remove any unnecessary complexity
-- Use the Xcode MCP to very SwiftUI Previews for UI changes
+- When yu've finished, create a PR for the developer to review your changes
