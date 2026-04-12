@@ -312,6 +312,27 @@ func TestRotateRefreshToken(t *testing.T) {
 	}
 }
 
+func TestRotateRefreshToken_ExpiredOldToken(t *testing.T) {
+	svc, pool := testTokenServiceWithDB(t)
+	userID := createTestUser(t, pool)
+	ctx := context.Background()
+
+	oldToken := uuid.NewString()
+	tokenHash := hashToken(oldToken)
+	_, err := pool.Exec(ctx,
+		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+		userID, tokenHash, time.Now().Add(-1*time.Hour),
+	)
+	if err != nil {
+		t.Fatalf("insert expired token: %v", err)
+	}
+
+	_, err = svc.RotateRefreshToken(ctx, oldToken, userID)
+	if err == nil {
+		t.Fatal("expected error when rotating expired refresh token, got nil")
+	}
+}
+
 func TestRotateRefreshToken_InvalidOldToken(t *testing.T) {
 	svc, _ := testTokenServiceWithDB(t)
 	ctx := context.Background()

@@ -46,7 +46,7 @@ func NewTokenService(pemKey string, pool *pgxpool.Pool) (*TokenService, error) {
 	if err != nil {
 		pkcs1Key, pkcs1Err := x509.ParsePKCS1PrivateKey(block.Bytes)
 		if pkcs1Err != nil {
-			return nil, fmt.Errorf("auth: parse private key: %w", err)
+			return nil, fmt.Errorf("auth: parse private key: pkcs8: %v, pkcs1: %w", err, pkcs1Err)
 		}
 		key = pkcs1Key
 	}
@@ -87,11 +87,14 @@ func (s *TokenService) GenerateAccessToken(userID, email string) (string, error)
 func (s *TokenService) ValidateAccessToken(tokenString string) (*Claims, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, fmt.Errorf("auth: unexpected signing method: %v", token.Header["alg"])
 		}
 		return &s.privateKey.PublicKey, nil
-	})
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		jwt.WithIssuer(issuer),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("auth: validate access token: %w", err)
 	}
@@ -101,6 +104,8 @@ func (s *TokenService) ValidateAccessToken(tokenString string) (*Claims, error) 
 	return claims, nil
 }
 
+var errNoPool = fmt.Errorf("auth: no database pool configured")
+
 func hashToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
@@ -109,6 +114,9 @@ func hashToken(token string) string {
 // GenerateRefreshToken creates an opaque UUID refresh token, stores its
 // SHA-256 hash in Postgres with a 90 day expiry, and returns the raw token.
 func (s *TokenService) GenerateRefreshToken(ctx context.Context, userID string) (string, error) {
+	if s.pool == nil {
+		return "", errNoPool
+	}
 	rawToken := uuid.NewString()
 	tokenHash := hashToken(rawToken)
 	expiresAt := time.Now().Add(refreshTokenTTL)
@@ -126,6 +134,9 @@ func (s *TokenService) GenerateRefreshToken(ctx context.Context, userID string) 
 // ValidateRefreshToken looks up the SHA-256 hash of the given token in Postgres,
 // checks expiry, and returns the owning user ID.
 func (s *TokenService) ValidateRefreshToken(ctx context.Context, tokenString string) (string, error) {
+	if s.pool == nil {
+		return "", errNoPool
+	}
 	tokenHash := hashToken(tokenString)
 
 	var userID string
@@ -144,6 +155,9 @@ func (s *TokenService) ValidateRefreshToken(ctx context.Context, tokenString str
 // new one in a single statement. Returns an error if the old token is not found
 // or does not belong to the given user.
 func (s *TokenService) RotateRefreshToken(ctx context.Context, oldToken, userID string) (string, error) {
+	if s.pool == nil {
+		return "", errNoPool
+	}
 	oldHash := hashToken(oldToken)
 	newToken := uuid.NewString()
 	newHash := hashToken(newToken)
@@ -151,7 +165,9 @@ func (s *TokenService) RotateRefreshToken(ctx context.Context, oldToken, userID 
 
 	tag, err := s.pool.Exec(ctx,
 		`WITH deleted AS (
-			DELETE FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2 RETURNING id
+			DELETE FROM refresh_tokens
+			WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()
+			RETURNING id
 		)
 		INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
 		SELECT $2, $3, $4 FROM deleted`,
