@@ -1,5 +1,8 @@
 settings.local.json
 
+# Generated
+backend/gen/
+
 # IDE
 .idea/
 .vscode/
