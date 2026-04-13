@@ -1,7 +1,7 @@
-.PHONY: proto-gen docker-up docker-down db-create run test
+.PHONY: gqlgen docker-up docker-down db-create run test
 
-proto-gen:
-	cd backend && buf generate
+gqlgen:
+	cd backend && go run github.com/99designs/gqlgen generate
 
 docker-up:
 	docker compose up -d

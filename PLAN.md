@@ -46,7 +46,7 @@ iOS                              Go Backend
 
 - **Access token**: JWT, RS256, 15 min TTL, contains `user_id` and `email`
 - **Refresh token**: Opaque UUID, hashed (SHA-256) in Postgres, 90 day TTL
-- **Refresh flow**: Client detects `Unauthenticated` gRPC status -> calls `RefreshToken` -> retries
+- **Refresh flow**: Client detects auth error -> calls `refreshToken` mutation -> retries
 - **Rotation**: Each refresh issues a new refresh token and invalidates the old one
 
 ---
@@ -63,7 +63,7 @@ Set up the Go module and directory structure.
 - `backend/internal/auth/` directory
 - `backend/internal/config/config.go` (env-based config: `SPLITTY_ENV`, `DATABASE_URL`, `JWT_PRIVATE_KEY`)
 - `backend/internal/db/` directory
-- `Makefile` with targets: `proto-gen`, `docker-up`, `docker-down`, `run`, `test`
+- `Makefile` with targets: `gqlgen`, `docker-up`, `docker-down`, `run`, `test`
 
 **Done when:** `go build ./...` succeeds from `backend/`
 
@@ -80,59 +80,47 @@ Set up Postgres for local development.
 
 ---
 
-### 3. Proto definitions + buf config
+### 3. GraphQL schema + gqlgen config
 
-Define the auth service protobuf and set up code generation.
+Define the auth schema and set up code generation with gqlgen.
 
 **Files to create:**
-- `backend/buf.yaml`
-- `backend/buf.gen.yaml`
-- `backend/proto/splitty/v1/auth.proto`
-- `backend/proto/splitty/v1/splitty.proto` (stub — empty service for now)
+- `backend/gqlgen.yml`
+- `backend/graph/schema.graphqls`
+- `backend/tools.go` (tool dependency pin)
 
-**Proto schema:**
+**GraphQL schema:**
 
-```protobuf
-service AuthService {
-  rpc SignInWithApple(SignInWithAppleRequest) returns (AuthResponse);
-  rpc SendPasscode(SendPasscodeRequest) returns (SendPasscodeResponse);
-  rpc VerifyPasscode(VerifyPasscodeRequest) returns (AuthResponse);
-  rpc RefreshToken(RefreshTokenRequest) returns (AuthResponse);
+```graphql
+type User {
+  id: ID!
+  email: String!
+  displayName: String!
 }
 
-message SignInWithAppleRequest {
-  string identity_token = 1;
+type AuthResponse {
+  accessToken: String!
+  refreshToken: String!
+  user: User!
 }
 
-message SendPasscodeRequest {
-  string email = 1;
+type SendPasscodeResponse {
+  success: Boolean!
 }
 
-message SendPasscodeResponse {}
-
-message VerifyPasscodeRequest {
-  string email = 1;
-  string code = 2;
+type Mutation {
+  signInWithApple(identityToken: String!): AuthResponse!
+  sendPasscode(email: String!): SendPasscodeResponse!
+  verifyPasscode(email: String!, code: String!): AuthResponse!
+  refreshToken(refreshToken: String!): AuthResponse!
 }
 
-message RefreshTokenRequest {
-  string refresh_token = 1;
-}
-
-message AuthResponse {
-  string access_token = 1;
-  string refresh_token = 2;
-  User user = 3;
-}
-
-message User {
-  string id = 1;
-  string email = 2;
-  string display_name = 3;
+type Query {
+  me: User
 }
 ```
 
-**Done when:** `make proto-gen` produces Go gRPC stubs in `backend/gen/`
+**Done when:** `make gqlgen` produces Go types and resolvers in `backend/graph/`
 
 ---
 
@@ -213,35 +201,34 @@ Implement the passcode flow that varies by environment.
 
 **Files to create/modify:**
 - `backend/internal/auth/passcode.go`
-  - `SendPasscode(email)`:
+  - `sendPasscode(email)`:
     - dev: log passcode to stdout (or accept any code, so sending is optional)
-    - prod: return gRPC `Unavailable` error
-  - `VerifyPasscode(email, code)`:
+    - prod: return error (method unavailable)
+  - `verifyPasscode(email, code)`:
     - dev: accept any code, upsert user by email, return tokens
-    - prod: return gRPC `Unavailable` error
+    - prod: return error (method unavailable)
 - `backend/internal/auth/passcode_test.go`
 
 **Done when:** Tests pass for both dev and prod behavior
 
 ---
 
-### 8. Auth — gRPC interceptor
+### 8. Auth — GraphQL middleware
 
-Wire up authentication middleware for all RPCs.
+Wire up authentication middleware for GraphQL resolvers.
 
 **Files to create/modify:**
-- `backend/internal/auth/interceptor.go`
-  - Unary and stream interceptors using `go-grpc-middleware/v2`
-  - Extract bearer token from gRPC metadata
+- `backend/internal/auth/middleware.go`
+  - HTTP middleware that extracts bearer token from `Authorization` header
   - Verify JWT, inject `user_id` into context
-  - Skip auth for: `SignInWithApple`, `SendPasscode`, `VerifyPasscode`, `RefreshToken`
-- `backend/internal/auth/interceptor_test.go`
+  - Auth mutations (`signInWithApple`, `sendPasscode`, `verifyPasscode`, `refreshToken`) are public — middleware should not block them
+- `backend/internal/auth/middleware_test.go`
 
-**Done when:** Tests pass — authed calls succeed, unauthed calls get `Unauthenticated`
+**Done when:** Tests pass — authed requests succeed, unauthed requests to protected resolvers get an error
 
 ---
 
-### 9. gRPC server — wire everything up
+### 9. GraphQL server — wire everything up
 
 Create the server entry point that ties all pieces together.
 
@@ -249,12 +236,12 @@ Create the server entry point that ties all pieces together.
 - `backend/cmd/server/main.go`
   - Load config
   - Connect to Postgres, run migrations
-  - Generate or load RSA key pair for JWT signing
-  - Register `AuthService` with gRPC server
-  - Attach auth interceptor
-  - Serve on configured port
+  - Initialize TokenService
+  - Create GraphQL handler with gqlgen
+  - Serve playground at `/`, GraphQL endpoint at `/query`
+  - Listen on port 8080
 
-**Done when:** `docker-compose up` + `go run ./cmd/server` starts the server, and `grpcurl` can call `SendPasscode` + `VerifyPasscode` successfully in dev mode
+**Done when:** `docker-compose up` + `go run ./cmd/server` starts the server, GraphQL playground is accessible, and mutations can be called
 
 ---
 
@@ -265,7 +252,7 @@ Scaffold the iOS app with xcodegen.
 **Files to create:**
 - `ios/project.yml` — xcodegen spec (deployment target, Swift packages for grpc-swift)
 - `ios/Splitty/App/SplittyApp.swift` — app entry point
-- `ios/Splitty/Services/GRPCClient.swift` — gRPC client setup, auth interceptor (attach bearer token from Keychain)
+- `ios/Splitty/Services/GraphQLClient.swift` — GraphQL client setup, auth header (attach bearer token from Keychain)
 - `ios/Splitty/Keychain/KeychainHelper.swift` — store/retrieve tokens
 
 **Done when:** `xcodegen generate` produces a buildable Xcode project
@@ -282,9 +269,9 @@ Build the login UI and auth flow.
   - Email + passcode form (for dev — could be conditionally shown via a build config flag)
 - `ios/Splitty/Auth/AuthViewModel.swift`
   - Auth state management (signed out, loading, signed in)
-  - Call `SignInWithApple` / `SendPasscode` + `VerifyPasscode` RPCs
+  - Call `signInWithApple` / `sendPasscode` + `verifyPasscode` mutations
   - Store tokens in Keychain on success
-  - Token refresh: detect `Unauthenticated` -> call `RefreshToken` -> retry
+  - Token refresh: detect auth error -> call `refreshToken` mutation -> retry
 
 **Done when:** Login screen renders in SwiftUI preview, auth flow works against local backend in simulator
 
@@ -296,21 +283,19 @@ Build the login UI and auth flow.
 | Dependency | Purpose |
 |---|---|
 | `github.com/golang-jwt/jwt/v5` | JWT creation/verification |
-| `github.com/grpc-ecosystem/go-grpc-middleware/v2` | gRPC auth interceptor |
-| `google.golang.org/grpc` | gRPC server |
-| `google.golang.org/protobuf` | Protobuf runtime |
+| `github.com/99designs/gqlgen` | GraphQL server + code generation |
+| `github.com/vektah/gqlparser/v2` | GraphQL parser runtime |
 | `github.com/jackc/pgx/v5` | Postgres driver |
 | `github.com/pressly/goose/v3` | Database migrations |
 
 ### iOS
 | Dependency | Purpose |
 |---|---|
-| `grpc-swift` | gRPC client (SPM) |
+| TBD | GraphQL client (SPM) |
 | `AuthenticationServices` | Sign in with Apple (system framework) |
 
 ### Tools
 | Tool | Purpose |
 |---|---|
-| `buf` | Proto compilation and linting |
 | `xcodegen` | Xcode project generation |
 | `docker` / `docker-compose` | Local Postgres + backend |

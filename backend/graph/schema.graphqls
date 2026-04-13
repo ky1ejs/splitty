@@ -1,0 +1,27 @@
+type User {
+  id: ID!
+  email: String!
+  displayName: String!
+}
+
+type AuthResponse {
+  accessToken: String!
+  refreshToken: String!
+  user: User!
+}
+
+type SendPasscodeResponse {
+  success: Boolean!
+}
+
+type Mutation {
+  signInWithApple(identityToken: String!): AuthResponse!
+  sendPasscode(email: String!): SendPasscodeResponse!
+  verifyPasscode(email: String!, code: String!): AuthResponse!
+  refreshToken(refreshToken: String!): AuthResponse!
+}
+
+type Query {
+  "Returns the currently authenticated user."
+  me: User
+}

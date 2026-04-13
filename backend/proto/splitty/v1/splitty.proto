@@ -1,6 +1,0 @@
-syntax = "proto3";
-
-package splitty.v1;
-
-// SplittyService will contain the core expense-splitting RPCs.
-service SplittyService {}
