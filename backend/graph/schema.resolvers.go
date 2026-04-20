@@ -14,27 +14,27 @@ import (
 
 // SignInWithApple is the resolver for the signInWithApple field.
 func (r *mutationResolver) SignInWithApple(ctx context.Context, identityToken string) (*model.AuthResponse, error) {
-	panic(fmt.Errorf("not implemented: SignInWithApple - signInWithApple"))
+	return nil, fmt.Errorf("not implemented: SignInWithApple")
 }
 
 // SendPasscode is the resolver for the sendPasscode field.
 func (r *mutationResolver) SendPasscode(ctx context.Context, email string) (*model.SendPasscodeResponse, error) {
-	panic(fmt.Errorf("not implemented: SendPasscode - sendPasscode"))
+	return nil, fmt.Errorf("not implemented: SendPasscode")
 }
 
 // VerifyPasscode is the resolver for the verifyPasscode field.
 func (r *mutationResolver) VerifyPasscode(ctx context.Context, email string, code string) (*model.AuthResponse, error) {
-	panic(fmt.Errorf("not implemented: VerifyPasscode - verifyPasscode"))
+	return nil, fmt.Errorf("not implemented: VerifyPasscode")
 }
 
 // RefreshToken is the resolver for the refreshToken field.
 func (r *mutationResolver) RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error) {
-	panic(fmt.Errorf("not implemented: RefreshToken - refreshToken"))
+	return nil, fmt.Errorf("not implemented: RefreshToken")
 }
 
 // Me is the resolver for the me field.
 func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: Me - me"))
+	return nil, fmt.Errorf("not implemented: Me")
 }
 
 // Mutation returns MutationResolver implementation.
