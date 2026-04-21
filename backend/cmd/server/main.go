@@ -52,10 +52,15 @@ func main() {
 		},
 	}))
 
-	http.Handle("/", playground.Handler("Splitty", "/query"))
+	if cfg.Env == "development" {
+		http.Handle("/", playground.Handler("Splitty", "/query"))
+	}
 	http.Handle("/query", srv)
 
 	port := "8080"
-	log.Printf("GraphQL playground at http://localhost:%s/", port)
+	if cfg.Env == "development" {
+		log.Printf("GraphQL playground at http://localhost:%s/", port)
+	}
+	log.Printf("listening on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
