@@ -4,7 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/playground"
+	"github.com/kylejs/splitty/backend/graph"
+	"github.com/kylejs/splitty/backend/internal/auth"
 	"github.com/kylejs/splitty/backend/internal/config"
 	"github.com/kylejs/splitty/backend/internal/db"
 )
@@ -30,4 +35,32 @@ func main() {
 	}
 
 	log.Println("database connected and migrations applied")
+
+	var tokenService *auth.TokenService
+	if cfg.JWTPrivateKey != "" {
+		tokenService, err = auth.NewTokenService(cfg.JWTPrivateKey, pool)
+		if err != nil {
+			log.Fatalf("failed to create token service: %v", err)
+		}
+	}
+
+	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
+		Resolvers: &graph.Resolver{
+			Pool:         pool,
+			TokenService: tokenService,
+			Config:       cfg,
+		},
+	}))
+
+	if cfg.Env == "development" {
+		http.Handle("/", playground.Handler("Splitty", "/query"))
+	}
+	http.Handle("/query", srv)
+
+	port := "8080"
+	if cfg.Env == "development" {
+		log.Printf("GraphQL playground at http://localhost:%s/", port)
+	}
+	log.Printf("listening on :%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }

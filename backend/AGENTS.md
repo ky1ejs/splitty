@@ -1,12 +1,11 @@
 # Splitty Backend
 
-Go + gRPC backend for the Splitty expense-splitting app.
+Go + GraphQL backend for the Splitty expense-splitting app.
 
 ## Prerequisites
 
 - Go 1.24+
 - Docker (with Compose V2)
-- [buf](https://buf.build/) for protobuf code generation
 
 ## Getting Started
 
@@ -17,8 +16,8 @@ make docker-up
 # Create the splitty_dev database (first time only)
 make db-create
 
-# Generate proto stubs (required before first build)
-make proto-gen
+# Generate GraphQL code (required before first build)
+make gqlgen
 
 # Build
 cd backend && go build ./...
@@ -42,10 +41,13 @@ backend/
     auth/             # Authentication (JWT, Apple Sign-In, passcode)
     config/           # Environment-based configuration
     db/               # Database connection and migrations
-  gen/splitty/v1/     # Generated gRPC stubs (not committed, run make proto-gen)
-  proto/splitty/v1/   # Protobuf definitions
-  buf.yaml            # buf module config
-  buf.gen.yaml        # buf code generation config
+  graph/
+    schema.graphqls   # GraphQL schema definition
+    generated.go      # Generated runtime (not committed, run make gqlgen)
+    model/            # Generated Go types (not committed)
+    resolver.go       # Resolver struct with dependencies
+    *.resolvers.go    # Resolver implementations
+  gqlgen.yml          # gqlgen configuration
 ```
 
 ## Configuration
@@ -60,15 +62,17 @@ Environment variables:
 
 Local Postgres URL: `postgres://postgres@localhost:5432/splitty_dev?sslmode=disable`
 
-## Protobuf
+## GraphQL
 
-Proto files live in `proto/splitty/v1/`. After editing, regenerate stubs:
+Schema files live in `graph/`. After editing, regenerate code:
 
 ```bash
-make proto-gen
+make gqlgen
 ```
 
-This runs `buf generate` and outputs Go code to `gen/splitty/v1/`.
+This runs `gqlgen generate` and outputs Go code to `graph/generated.go` and `graph/model/models_gen.go`.
+
+The GraphQL playground is available at `http://localhost:8080/` when the server is running.
 
 ## Workflow
 - Write tests for new features and bug fixes

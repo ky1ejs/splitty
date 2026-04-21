@@ -1,7 +1,8 @@
 settings.local.json
 
-# Generated
-backend/gen/
+# Generated (gqlgen)
+backend/graph/generated.go
+backend/graph/model/models_gen.go
 
 # IDE
 .idea/

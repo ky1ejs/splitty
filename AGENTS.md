@@ -12,7 +12,7 @@ This repo is the beginning of an iOS app and backend that allows users to split 
 - Go
 - Docker
 - Postgres
-- gRPC API
+- GraphQL (gqlgen)
 
 ## Auth
 TBD

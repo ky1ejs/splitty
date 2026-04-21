@@ -30,5 +30,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
+      - name: Generate GraphQL code
+        run: go run github.com/99designs/gqlgen generate
       - run: go build ./...
       - run: go test ./...
