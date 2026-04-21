@@ -11,8 +11,8 @@ func TestLoadDefaults(t *testing.T) {
 
 	cfg := Load()
 
-	if cfg.Env != "development" {
-		t.Errorf("expected Env=%q, got %q", "development", cfg.Env)
+	if cfg.Env != EnvDevelopment {
+		t.Errorf("expected Env=%q, got %q", EnvDevelopment, cfg.Env)
 	}
 	if cfg.DatabaseURL != "" {
 		t.Errorf("expected empty DatabaseURL, got %q", cfg.DatabaseURL)
@@ -29,8 +29,8 @@ func TestLoadFromEnv(t *testing.T) {
 
 	cfg := Load()
 
-	if cfg.Env != "production" {
-		t.Errorf("expected Env=%q, got %q", "production", cfg.Env)
+	if cfg.Env != EnvProduction {
+		t.Errorf("expected Env=%q, got %q", EnvProduction, cfg.Env)
 	}
 	if cfg.DatabaseURL != "postgres://localhost:5432/splitty" {
 		t.Errorf("expected DatabaseURL=%q, got %q", "postgres://localhost:5432/splitty", cfg.DatabaseURL)

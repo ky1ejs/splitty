@@ -44,21 +44,35 @@ func main() {
 		}
 	}
 
+	var tokenIssuer auth.TokenIssuer
+	if tokenService != nil {
+		tokenIssuer = tokenService
+	} else {
+		tokenIssuer = &auth.DevTokenIssuer{}
+	}
+
+	passcodeService := auth.NewPasscodeService(
+		cfg.Env,
+		auth.NewPgUserStore(pool),
+		tokenIssuer,
+	)
+
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
 		Resolvers: &graph.Resolver{
-			Pool:         pool,
-			TokenService: tokenService,
-			Config:       cfg,
+			Pool:            pool,
+			TokenService:    tokenService,
+			PasscodeService: passcodeService,
+			Config:          cfg,
 		},
 	}))
 
-	if cfg.Env == "development" {
+	if cfg.Env == config.EnvDevelopment {
 		http.Handle("/", playground.Handler("Splitty", "/query"))
 	}
 	http.Handle("/query", srv)
 
 	port := "8080"
-	if cfg.Env == "development" {
+	if cfg.Env == config.EnvDevelopment {
 		log.Printf("GraphQL playground at http://localhost:%s/", port)
 	}
 	log.Printf("listening on :%s", port)
