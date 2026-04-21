@@ -12,7 +12,8 @@ import (
 // here.
 
 type Resolver struct {
-	Pool         *pgxpool.Pool
-	TokenService *auth.TokenService
-	Config       config.Config
+	Pool            *pgxpool.Pool
+	TokenService    *auth.TokenService
+	PasscodeService *auth.PasscodeService
+	Config          config.Config
 }

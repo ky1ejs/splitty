@@ -151,6 +151,20 @@ func (s *TokenService) ValidateRefreshToken(ctx context.Context, tokenString str
 	return userID, nil
 }
 
+// IssueTokens generates an access token and a refresh token for the given user.
+// This satisfies the TokenIssuer interface.
+func (s *TokenService) IssueTokens(ctx context.Context, userID, email string) (string, string, error) {
+	accessToken, err := s.GenerateAccessToken(userID, email)
+	if err != nil {
+		return "", "", err
+	}
+	refreshToken, err := s.GenerateRefreshToken(ctx, userID)
+	if err != nil {
+		return "", "", err
+	}
+	return accessToken, refreshToken, nil
+}
+
 // RotateRefreshToken atomically deletes the old refresh token and inserts a
 // new one in a single statement. Returns an error if the old token is not found
 // or does not belong to the given user.

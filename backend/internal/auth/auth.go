@@ -1,6 +1,16 @@
 package auth
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var (
+	ErrUnavailable    = errors.New("email passcode is not available")
+	ErrInvalidEmail   = errors.New("invalid email address")
+	ErrEmailRequired  = errors.New("email is required")
+	ErrCodeRequired   = errors.New("code is required")
+)
 
 // TokenIssuer generates access and refresh tokens for a user.
 type TokenIssuer interface {
@@ -17,4 +27,11 @@ type UserRecord struct {
 	ID          string
 	Email       string
 	DisplayName string
+}
+
+// AuthResult is the domain result of a successful authentication.
+type AuthResult struct {
+	AccessToken  string
+	RefreshToken string
+	User         *UserRecord
 }

@@ -5,10 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	splittyv1 "github.com/kylejs/splitty/backend/gen/splitty/v1"
 	"github.com/kylejs/splitty/backend/internal/config"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // --- mocks ---
@@ -30,21 +27,6 @@ func (m *mockTokenIssuer) IssueTokens(ctx context.Context, userID, email string)
 }
 
 // --- helpers ---
-
-func newTestServer(env string, users UserStore, tokens TokenIssuer) *AuthServer {
-	return NewAuthServer(env, users, tokens)
-}
-
-func assertCode(t *testing.T, err error, want codes.Code) {
-	t.Helper()
-	st, ok := status.FromError(err)
-	if !ok {
-		t.Fatalf("expected gRPC status error, got %v", err)
-	}
-	if st.Code() != want {
-		t.Errorf("expected code %v, got %v: %s", want, st.Code(), st.Message())
-	}
-}
 
 var testUser = &UserRecord{
 	ID:          "user-123",
@@ -71,112 +53,100 @@ func happyTokens() *mockTokenIssuer {
 // --- SendPasscode tests ---
 
 func TestSendPasscode_Dev_OK(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	resp, err := srv.SendPasscode(context.Background(), &splittyv1.SendPasscodeRequest{
-		Email: "alice@example.com",
-	})
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	err := svc.SendPasscode(context.Background(), "alice@example.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("expected non-nil response")
 	}
 }
 
 func TestSendPasscode_Prod_Unavailable(t *testing.T) {
-	srv := newTestServer(config.EnvProduction, happyStore(), happyTokens())
-	_, err := srv.SendPasscode(context.Background(), &splittyv1.SendPasscodeRequest{
-		Email: "alice@example.com",
-	})
-	assertCode(t, err, codes.Unavailable)
+	svc := NewPasscodeService(config.EnvProduction, happyStore(), happyTokens())
+	err := svc.SendPasscode(context.Background(), "alice@example.com")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Errorf("expected ErrUnavailable, got %v", err)
+	}
 }
 
 func TestSendPasscode_UnknownEnv_Unavailable(t *testing.T) {
-	srv := newTestServer("staging", happyStore(), happyTokens())
-	_, err := srv.SendPasscode(context.Background(), &splittyv1.SendPasscodeRequest{
-		Email: "alice@example.com",
-	})
-	assertCode(t, err, codes.Unavailable)
+	svc := NewPasscodeService("staging", happyStore(), happyTokens())
+	err := svc.SendPasscode(context.Background(), "alice@example.com")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Errorf("expected ErrUnavailable, got %v", err)
+	}
 }
 
 func TestSendPasscode_EmptyEmail(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	_, err := srv.SendPasscode(context.Background(), &splittyv1.SendPasscodeRequest{
-		Email: "",
-	})
-	assertCode(t, err, codes.InvalidArgument)
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	err := svc.SendPasscode(context.Background(), "")
+	if !errors.Is(err, ErrEmailRequired) {
+		t.Errorf("expected ErrEmailRequired, got %v", err)
+	}
 }
 
 func TestSendPasscode_InvalidEmail(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	_, err := srv.SendPasscode(context.Background(), &splittyv1.SendPasscodeRequest{
-		Email: "not-an-email",
-	})
-	assertCode(t, err, codes.InvalidArgument)
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	err := svc.SendPasscode(context.Background(), "not-an-email")
+	if !errors.Is(err, ErrInvalidEmail) {
+		t.Errorf("expected ErrInvalidEmail, got %v", err)
+	}
 }
 
 // --- VerifyPasscode tests ---
 
 func TestVerifyPasscode_Dev_OK(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	resp, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "alice@example.com",
-		Code:  "123456",
-	})
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	result, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.AccessToken != "access-tok" {
-		t.Errorf("expected access token %q, got %q", "access-tok", resp.AccessToken)
+	if result.AccessToken != "access-tok" {
+		t.Errorf("expected access token %q, got %q", "access-tok", result.AccessToken)
 	}
-	if resp.RefreshToken != "refresh-tok" {
-		t.Errorf("expected refresh token %q, got %q", "refresh-tok", resp.RefreshToken)
+	if result.RefreshToken != "refresh-tok" {
+		t.Errorf("expected refresh token %q, got %q", "refresh-tok", result.RefreshToken)
 	}
-	if resp.User == nil {
+	if result.User == nil {
 		t.Fatal("expected non-nil user")
 	}
-	if resp.User.Id != "user-123" {
-		t.Errorf("expected user id %q, got %q", "user-123", resp.User.Id)
+	if result.User.ID != "user-123" {
+		t.Errorf("expected user id %q, got %q", "user-123", result.User.ID)
 	}
-	if resp.User.Email != "alice@example.com" {
-		t.Errorf("expected user email %q, got %q", "alice@example.com", resp.User.Email)
+	if result.User.Email != "alice@example.com" {
+		t.Errorf("expected user email %q, got %q", "alice@example.com", result.User.Email)
 	}
 }
 
 func TestVerifyPasscode_Prod_Unavailable(t *testing.T) {
-	srv := newTestServer(config.EnvProduction, happyStore(), happyTokens())
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "alice@example.com",
-		Code:  "123456",
-	})
-	assertCode(t, err, codes.Unavailable)
+	svc := NewPasscodeService(config.EnvProduction, happyStore(), happyTokens())
+	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Errorf("expected ErrUnavailable, got %v", err)
+	}
 }
 
 func TestVerifyPasscode_EmptyEmail(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "",
-		Code:  "123456",
-	})
-	assertCode(t, err, codes.InvalidArgument)
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	_, err := svc.VerifyPasscode(context.Background(), "", "123456")
+	if !errors.Is(err, ErrEmailRequired) {
+		t.Errorf("expected ErrEmailRequired, got %v", err)
+	}
 }
 
 func TestVerifyPasscode_EmptyCode(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "alice@example.com",
-		Code:  "",
-	})
-	assertCode(t, err, codes.InvalidArgument)
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "")
+	if !errors.Is(err, ErrCodeRequired) {
+		t.Errorf("expected ErrCodeRequired, got %v", err)
+	}
 }
 
 func TestVerifyPasscode_InvalidEmail(t *testing.T) {
-	srv := newTestServer(config.EnvDevelopment, happyStore(), happyTokens())
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "bad",
-		Code:  "123456",
-	})
-	assertCode(t, err, codes.InvalidArgument)
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	_, err := svc.VerifyPasscode(context.Background(), "bad", "123456")
+	if !errors.Is(err, ErrInvalidEmail) {
+		t.Errorf("expected ErrInvalidEmail, got %v", err)
+	}
 }
 
 func TestVerifyPasscode_StoreError(t *testing.T) {
@@ -185,12 +155,11 @@ func TestVerifyPasscode_StoreError(t *testing.T) {
 			return nil, errors.New("db down")
 		},
 	}
-	srv := newTestServer(config.EnvDevelopment, store, happyTokens())
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "alice@example.com",
-		Code:  "123456",
-	})
-	assertCode(t, err, codes.Internal)
+	svc := NewPasscodeService(config.EnvDevelopment, store, happyTokens())
+	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
+	if err == nil {
+		t.Fatal("expected error")
+	}
 }
 
 func TestVerifyPasscode_TokenError(t *testing.T) {
@@ -199,12 +168,11 @@ func TestVerifyPasscode_TokenError(t *testing.T) {
 			return "", "", errors.New("token failure")
 		},
 	}
-	srv := newTestServer(config.EnvDevelopment, happyStore(), tokens)
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "alice@example.com",
-		Code:  "123456",
-	})
-	assertCode(t, err, codes.Internal)
+	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), tokens)
+	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
+	if err == nil {
+		t.Fatal("expected error")
+	}
 }
 
 func TestVerifyPasscode_EmailNormalization(t *testing.T) {
@@ -215,11 +183,8 @@ func TestVerifyPasscode_EmailNormalization(t *testing.T) {
 			return testUser, nil
 		},
 	}
-	srv := newTestServer(config.EnvDevelopment, store, happyTokens())
-	_, err := srv.VerifyPasscode(context.Background(), &splittyv1.VerifyPasscodeRequest{
-		Email: "  Alice@Example.COM  ",
-		Code:  "123456",
-	})
+	svc := NewPasscodeService(config.EnvDevelopment, store, happyTokens())
+	_, err := svc.VerifyPasscode(context.Background(), "  Alice@Example.COM  ", "123456")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

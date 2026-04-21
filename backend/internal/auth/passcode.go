@@ -2,78 +2,73 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/mail"
 	"strings"
 
-	splittyv1 "github.com/kylejs/splitty/backend/gen/splitty/v1"
 	"github.com/kylejs/splitty/backend/internal/config"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-// AuthServer implements the gRPC AuthService handlers for passcode-based auth.
-type AuthServer struct {
-	splittyv1.UnimplementedAuthServiceServer
+// PasscodeService implements the email passcode auth flow.
+// Behavior varies by environment: development accepts any code,
+// non-development returns ErrUnavailable.
+type PasscodeService struct {
 	env    string
 	users  UserStore
 	tokens TokenIssuer
 }
 
-// NewAuthServer creates an AuthServer with the given dependencies.
-func NewAuthServer(env string, users UserStore, tokens TokenIssuer) *AuthServer {
-	return &AuthServer{
+// NewPasscodeService creates a PasscodeService with the given dependencies.
+func NewPasscodeService(env string, users UserStore, tokens TokenIssuer) *PasscodeService {
+	return &PasscodeService{
 		env:    env,
 		users:  users,
 		tokens: tokens,
 	}
 }
 
-func (s *AuthServer) SendPasscode(_ context.Context, req *splittyv1.SendPasscodeRequest) (*splittyv1.SendPasscodeResponse, error) {
+func (s *PasscodeService) SendPasscode(_ context.Context, email string) error {
 	if s.env != config.EnvDevelopment {
-		return nil, status.Error(codes.Unavailable, "email passcode is not available")
+		return ErrUnavailable
 	}
 
-	email, err := normalizeEmail(req.GetEmail())
+	email, err := normalizeEmail(email)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	slog.Info("passcode requested (any code accepted in dev mode)", "email", email)
-	return &splittyv1.SendPasscodeResponse{}, nil
+	return nil
 }
 
-func (s *AuthServer) VerifyPasscode(ctx context.Context, req *splittyv1.VerifyPasscodeRequest) (*splittyv1.AuthResponse, error) {
+func (s *PasscodeService) VerifyPasscode(ctx context.Context, email, code string) (*AuthResult, error) {
 	if s.env != config.EnvDevelopment {
-		return nil, status.Error(codes.Unavailable, "email passcode is not available")
+		return nil, ErrUnavailable
 	}
 
-	email, err := normalizeEmail(req.GetEmail())
+	email, err := normalizeEmail(email)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetCode()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "code is required")
+	if strings.TrimSpace(code) == "" {
+		return nil, ErrCodeRequired
 	}
 
 	user, err := s.users.UpsertByEmail(ctx, email)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to upsert user: %v", err)
+		return nil, fmt.Errorf("upsert user: %w", err)
 	}
 
 	accessToken, refreshToken, err := s.tokens.IssueTokens(ctx, user.ID, user.Email)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to issue tokens: %v", err)
+		return nil, fmt.Errorf("issue tokens: %w", err)
 	}
 
-	return &splittyv1.AuthResponse{
+	return &AuthResult{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		User: &splittyv1.User{
-			Id:          user.ID,
-			Email:       user.Email,
-			DisplayName: user.DisplayName,
-		},
+		User:         user,
 	}, nil
 }
 
@@ -81,11 +76,11 @@ func (s *AuthServer) VerifyPasscode(ctx context.Context, req *splittyv1.VerifyPa
 func normalizeEmail(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", status.Error(codes.InvalidArgument, "email is required")
+		return "", ErrEmailRequired
 	}
 	addr, err := mail.ParseAddress(trimmed)
 	if err != nil {
-		return "", status.Error(codes.InvalidArgument, "invalid email address")
+		return "", ErrInvalidEmail
 	}
 	return strings.ToLower(addr.Address), nil
 }

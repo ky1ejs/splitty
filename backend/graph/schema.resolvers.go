@@ -7,9 +7,11 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kylejs/splitty/backend/graph/model"
+	"github.com/kylejs/splitty/backend/internal/auth"
 )
 
 // SignInWithApple is the resolver for the signInWithApple field.
@@ -19,12 +21,33 @@ func (r *mutationResolver) SignInWithApple(ctx context.Context, identityToken st
 
 // SendPasscode is the resolver for the sendPasscode field.
 func (r *mutationResolver) SendPasscode(ctx context.Context, email string) (*model.SendPasscodeResponse, error) {
-	return nil, fmt.Errorf("not implemented: SendPasscode")
+	if err := r.PasscodeService.SendPasscode(ctx, email); err != nil {
+		if errors.Is(err, auth.ErrUnavailable) {
+			return nil, fmt.Errorf("email passcode is not available")
+		}
+		return nil, err
+	}
+	return &model.SendPasscodeResponse{Success: true}, nil
 }
 
 // VerifyPasscode is the resolver for the verifyPasscode field.
 func (r *mutationResolver) VerifyPasscode(ctx context.Context, email string, code string) (*model.AuthResponse, error) {
-	return nil, fmt.Errorf("not implemented: VerifyPasscode")
+	result, err := r.PasscodeService.VerifyPasscode(ctx, email, code)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnavailable) {
+			return nil, fmt.Errorf("email passcode is not available")
+		}
+		return nil, err
+	}
+	return &model.AuthResponse{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		User: &model.User{
+			ID:          result.User.ID,
+			Email:       result.User.Email,
+			DisplayName: result.User.DisplayName,
+		},
+	}, nil
 }
 
 // RefreshToken is the resolver for the refreshToken field.
