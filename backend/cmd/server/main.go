@@ -69,7 +69,12 @@ func main() {
 	if cfg.Env == config.EnvDevelopment {
 		http.Handle("/", playground.Handler("Splitty", "/query"))
 	}
-	http.Handle("/query", srv)
+
+	var queryHandler http.Handler = srv
+	if tokenService != nil {
+		queryHandler = auth.Middleware(tokenService)(srv)
+	}
+	http.Handle("/query", queryHandler)
 
 	port := "8080"
 	if cfg.Env == config.EnvDevelopment {
