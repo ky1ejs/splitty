@@ -2,8 +2,13 @@ package config
 
 import "os"
 
+const (
+	EnvDevelopment = "development"
+	EnvProduction  = "production"
+)
+
 type Config struct {
-	Env           string // "development" or "production"
+	Env           string // EnvDevelopment or EnvProduction
 	DatabaseURL   string
 	JWTPrivateKey string
 }
@@ -11,7 +16,7 @@ type Config struct {
 func Load() Config {
 	env := os.Getenv("SPLITTY_ENV")
 	if env == "" {
-		env = "development"
+		env = EnvDevelopment
 	}
 	return Config{
 		Env:           env,
