@@ -8,9 +8,10 @@ const (
 )
 
 type Config struct {
-	Env           string // EnvDevelopment or EnvProduction
-	DatabaseURL   string
-	JWTPrivateKey string
+	Env               string // EnvDevelopment or EnvProduction
+	DatabaseURL       string
+	JWTPrivateKey     string
+	CORSAllowedOrigin string
 }
 
 func Load() Config {
@@ -18,9 +19,15 @@ func Load() Config {
 	if env == "" {
 		env = EnvDevelopment
 	}
+	corsOrigin := os.Getenv("CORS_ALLOWED_ORIGIN")
+	if corsOrigin == "" && env == EnvDevelopment {
+		corsOrigin = "http://localhost:5173"
+	}
+
 	return Config{
-		Env:           env,
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		JWTPrivateKey: os.Getenv("JWT_PRIVATE_KEY"),
+		Env:               env,
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		JWTPrivateKey:     os.Getenv("JWT_PRIVATE_KEY"),
+		CORSAllowedOrigin: corsOrigin,
 	}
 }

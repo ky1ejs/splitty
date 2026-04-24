@@ -12,5 +12,15 @@ backend/graph/model/models_gen.go
 # OS
 .DS_Store
 
+# Binaries
+backend/server
+
 # Environment
-.env
+backend/.env
+
+# Web app
+web/node_modules/
+web/dist/
+
+# Generated (graphql-codegen)
+web/src/gql/
