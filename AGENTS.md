@@ -8,6 +8,13 @@ This repo is the beginning of an iOS app and backend that allows users to split 
 - xcodegen
 - SwiftUI
 
+## Web
+- React
+- Vite
+- TypeScript
+- urql (GraphQL client)
+- React Router
+
 ## Backend
 - Go
 - Docker

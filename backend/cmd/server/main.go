@@ -11,6 +11,7 @@ import (
 	"github.com/kylejs/splitty/backend/graph"
 	"github.com/kylejs/splitty/backend/internal/auth"
 	"github.com/kylejs/splitty/backend/internal/config"
+	"github.com/kylejs/splitty/backend/internal/cors"
 	"github.com/kylejs/splitty/backend/internal/db"
 )
 
@@ -71,20 +72,24 @@ func main() {
 		},
 	}))
 
+	mux := http.NewServeMux()
+
 	if cfg.Env == config.EnvDevelopment {
-		http.Handle("/", playground.Handler("Splitty", "/query"))
+		mux.Handle("/", playground.Handler("Splitty", "/query"))
 	}
 
 	var queryHandler http.Handler = srv
 	if tokenService != nil {
 		queryHandler = auth.Middleware(tokenService)(srv)
 	}
-	http.Handle("/query", queryHandler)
+	mux.Handle("/query", queryHandler)
+
+	handler := cors.Middleware(cfg.CORSAllowedOrigin)(mux)
 
 	port := "8080"
 	if cfg.Env == config.EnvDevelopment {
 		log.Printf("GraphQL playground at http://localhost:%s/", port)
 	}
 	log.Printf("listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }

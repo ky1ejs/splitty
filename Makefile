@@ -1,4 +1,4 @@
-.PHONY: gqlgen docker-up docker-down db-create run test
+.PHONY: gqlgen docker-up docker-down db-create run test web-install web-codegen web-dev web-build
 
 gqlgen:
 	cd backend && go run github.com/99designs/gqlgen generate
@@ -18,3 +18,15 @@ run:
 
 test:
 	cd backend && go test ./...
+
+web-install:
+	cd web && npm install
+
+web-codegen:
+	cd web && npm run codegen
+
+web-dev:
+	cd web && npm run dev
+
+web-build:
+	cd web && npm run build
