@@ -39,6 +39,16 @@ func TestPreflightReturns204(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
 		t.Fatalf("expected Allow-Credentials true, got %q", got)
 	}
+	vary := rec.Header().Values("Vary")
+	wantVary := map[string]bool{"Origin": false, "Access-Control-Request-Method": false, "Access-Control-Request-Headers": false}
+	for _, v := range vary {
+		wantVary[v] = true
+	}
+	for k, found := range wantVary {
+		if !found {
+			t.Fatalf("expected Vary to contain %q", k)
+		}
+	}
 }
 
 func TestActualRequestSetsCORSHeaders(t *testing.T) {
@@ -58,6 +68,9 @@ func TestActualRequestSetsCORSHeaders(t *testing.T) {
 	}
 	if rec.Body.String() != "ok" {
 		t.Fatalf("expected body 'ok', got %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("Vary"); got != "Origin" {
+		t.Fatalf("expected Vary 'Origin', got %q", got)
 	}
 }
 

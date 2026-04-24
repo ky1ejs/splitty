@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "graphql-codegen --config codegen.ts",
     "dev": "vite",
+    "prebuild": "graphql-codegen --config codegen.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "codegen": "graphql-codegen --config codegen.ts",
