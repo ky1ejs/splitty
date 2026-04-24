@@ -53,9 +53,11 @@ func main() {
 		tokenIssuer = &auth.DevTokenIssuer{}
 	}
 
+	userStore := auth.NewPgUserStore(pool)
+
 	passcodeService := auth.NewPasscodeService(
 		cfg.Env,
-		auth.NewPgUserStore(pool),
+		userStore,
 		tokenIssuer,
 	)
 
@@ -64,6 +66,7 @@ func main() {
 			Pool:            pool,
 			TokenService:    tokenService,
 			PasscodeService: passcodeService,
+			UserStore:       userStore,
 			Config:          cfg,
 		},
 	}))
