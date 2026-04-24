@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -30,13 +31,15 @@ func TestGetByID_OK(t *testing.T) {
 	store := testUserStore(t)
 	ctx := context.Background()
 
-	// Create a user via UpsertByEmail
-	created, err := store.UpsertByEmail(ctx, "getbyid@example.com")
+	email := fmt.Sprintf("getbyid-%s@example.com", uuid.NewString())
+	created, err := store.UpsertByEmail(ctx, email)
 	if err != nil {
 		t.Fatalf("UpsertByEmail: %v", err)
 	}
 	t.Cleanup(func() {
-		store.pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, created.ID)
+		if _, err := store.pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, created.ID); err != nil {
+			t.Errorf("cleanup delete user %q: %v", created.ID, err)
+		}
 	})
 
 	got, err := store.GetByID(ctx, created.ID)

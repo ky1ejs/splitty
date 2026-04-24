@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/kylejs/splitty/backend/graph/model"
 	"github.com/kylejs/splitty/backend/internal/auth"
@@ -58,22 +59,26 @@ func (r *mutationResolver) RefreshToken(ctx context.Context, refreshToken string
 
 	userID, err := r.TokenService.ValidateRefreshToken(ctx, refreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("invalid refresh token: %w", err)
+		log.Printf("validate refresh token: %v", err)
+		return nil, fmt.Errorf("invalid refresh token")
 	}
 
 	user, err := r.UserStore.GetByID(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("lookup user: %w", err)
+		log.Printf("lookup user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to refresh token")
 	}
 
 	newRefresh, err := r.TokenService.RotateRefreshToken(ctx, refreshToken, userID)
 	if err != nil {
-		return nil, fmt.Errorf("rotate refresh token: %w", err)
+		log.Printf("rotate refresh token for user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to refresh token")
 	}
 
 	newAccess, err := r.TokenService.GenerateAccessToken(userID, user.Email)
 	if err != nil {
-		return nil, fmt.Errorf("generate access token: %w", err)
+		log.Printf("generate access token for user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to refresh token")
 	}
 
 	return &model.AuthResponse{
@@ -96,7 +101,8 @@ func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
 
 	user, err := r.UserStore.GetByID(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("lookup user: %w", err)
+		log.Printf("lookup user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to load user")
 	}
 
 	return &model.User{

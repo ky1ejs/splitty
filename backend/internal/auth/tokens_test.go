@@ -225,7 +225,9 @@ func createTestUser(t *testing.T, pool *pgxpool.Pool) string {
 		t.Fatalf("create test user: %v", err)
 	}
 	t.Cleanup(func() {
-		pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+		if _, err := pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup delete user %q: %v", userID, err)
+		}
 	})
 	return userID
 }
