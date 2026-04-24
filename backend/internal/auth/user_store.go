@@ -17,6 +17,19 @@ func NewPgUserStore(pool *pgxpool.Pool) *PgUserStore {
 	return &PgUserStore{pool: pool}
 }
 
+// GetByID returns the user with the given ID, or an error if not found.
+func (s *PgUserStore) GetByID(ctx context.Context, id string) (*UserRecord, error) {
+	var u UserRecord
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, display_name FROM users WHERE id = $1`,
+		id,
+	).Scan(&u.ID, &u.Email, &u.DisplayName)
+	if err != nil {
+		return nil, fmt.Errorf("get user by id: %w", err)
+	}
+	return &u, nil
+}
+
 func (s *PgUserStore) UpsertByEmail(ctx context.Context, email string) (*UserRecord, error) {
 	var u UserRecord
 	err := s.pool.QueryRow(ctx,

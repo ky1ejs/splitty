@@ -15,5 +15,6 @@ type Resolver struct {
 	Pool            *pgxpool.Pool
 	TokenService    *auth.TokenService
 	PasscodeService *auth.PasscodeService
+	UserStore       *auth.PgUserStore
 	Config          config.Config
 }

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/kylejs/splitty/backend/graph/model"
 	"github.com/kylejs/splitty/backend/internal/auth"
@@ -52,12 +53,63 @@ func (r *mutationResolver) VerifyPasscode(ctx context.Context, email string, cod
 
 // RefreshToken is the resolver for the refreshToken field.
 func (r *mutationResolver) RefreshToken(ctx context.Context, refreshToken string) (*model.AuthResponse, error) {
-	return nil, fmt.Errorf("not implemented: RefreshToken")
+	if r.TokenService == nil {
+		return nil, fmt.Errorf("token refresh requires JWT_PRIVATE_KEY to be configured")
+	}
+
+	userID, err := r.TokenService.ValidateRefreshToken(ctx, refreshToken)
+	if err != nil {
+		log.Printf("validate refresh token: %v", err)
+		return nil, fmt.Errorf("invalid refresh token")
+	}
+
+	user, err := r.UserStore.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("lookup user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to refresh token")
+	}
+
+	newRefresh, err := r.TokenService.RotateRefreshToken(ctx, refreshToken, userID)
+	if err != nil {
+		log.Printf("rotate refresh token for user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to refresh token")
+	}
+
+	newAccess, err := r.TokenService.GenerateAccessToken(userID, user.Email)
+	if err != nil {
+		log.Printf("generate access token for user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to refresh token")
+	}
+
+	return &model.AuthResponse{
+		AccessToken:  newAccess,
+		RefreshToken: newRefresh,
+		User: &model.User{
+			ID:          user.ID,
+			Email:       user.Email,
+			DisplayName: user.DisplayName,
+		},
+	}, nil
 }
 
 // Me is the resolver for the me field.
 func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
-	return nil, fmt.Errorf("not implemented: Me")
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return nil, nil
+	}
+
+	user, err := r.UserStore.GetByID(ctx, userID)
+	if err != nil {
+		log.Printf("lookup user %s: %v", userID, err)
+		return nil, fmt.Errorf("failed to load user")
+	}
+
+	return &model.User{
+		ID:          user.ID,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+	}, nil
 }
 
 // Mutation returns MutationResolver implementation.
