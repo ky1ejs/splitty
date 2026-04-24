@@ -60,15 +60,21 @@ func writeUnauthorized(w http.ResponseWriter, msg string) {
 	})
 }
 
+// maxBodySize is the maximum request body size the middleware will read
+// when checking for public operations (1 MB).
+const maxBodySize = 1 << 20
+
 func isPublicOperation(r *http.Request) bool {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	limited := io.LimitReader(r.Body, maxBodySize+1)
+	body, err := io.ReadAll(limited)
+	if err != nil || len(body) > maxBodySize {
 		return false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	var req struct {
-		Query string `json:"query"`
+		Query         string `json:"query"`
+		OperationName string `json:"operationName"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil || req.Query == "" {
 		return false
@@ -79,24 +85,51 @@ func isPublicOperation(r *http.Request) bool {
 		return false
 	}
 
-	if len(doc.Operations) == 0 {
+	op := findOperation(doc, req.OperationName)
+	if op == nil || op.Operation != ast.Mutation {
 		return false
 	}
 
-	for _, op := range doc.Operations {
-		if op.Operation != ast.Mutation {
-			return false
+	return allSelectionsPublic(op.SelectionSet, doc)
+}
+
+func findOperation(doc *ast.QueryDocument, name string) *ast.OperationDefinition {
+	if len(doc.Operations) == 0 {
+		return nil
+	}
+	if name == "" {
+		if len(doc.Operations) == 1 {
+			return doc.Operations[0]
 		}
-		for _, sel := range op.SelectionSet {
-			field, ok := sel.(*ast.Field)
-			if !ok {
-				return false
-			}
-			if !publicMutations[field.Name] {
-				return false
-			}
+		return nil
+	}
+	for _, op := range doc.Operations {
+		if op.Name == name {
+			return op
 		}
 	}
+	return nil
+}
 
-	return true
+func allSelectionsPublic(selections ast.SelectionSet, doc *ast.QueryDocument) bool {
+	for _, sel := range selections {
+		switch s := sel.(type) {
+		case *ast.Field:
+			if !publicMutations[s.Name] {
+				return false
+			}
+		case *ast.InlineFragment:
+			if !allSelectionsPublic(s.SelectionSet, doc) {
+				return false
+			}
+		case *ast.FragmentSpread:
+			frag := doc.Fragments.ForName(s.Name)
+			if frag == nil || !allSelectionsPublic(frag.SelectionSet, doc) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return len(selections) > 0
 }

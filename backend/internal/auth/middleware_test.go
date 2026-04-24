@@ -127,6 +127,44 @@ func TestMiddleware(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantBody:   "user-123",
 		},
+		{
+			name:       "multi-operation with operationName selecting public mutation",
+			body:       `{"query":"mutation Public { sendPasscode(email: \"a@b.com\") { success } } query Private { me { id } }","operationName":"Public"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "no-user",
+		},
+		{
+			name:       "multi-operation with operationName selecting protected query",
+			body:       `{"query":"mutation Public { sendPasscode(email: \"a@b.com\") { success } } query Private { me { id } }","operationName":"Private"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "multi-operation without operationName",
+			body:       `{"query":"mutation A { sendPasscode(email: \"a@b.com\") { success } } mutation B { refreshToken(refreshToken: \"t\") { accessToken } }"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "public mutation via inline fragment",
+			body:       `{"query":"mutation { ... { sendPasscode(email: \"a@b.com\") { success } } }"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "no-user",
+		},
+		{
+			name:       "public mutation via named fragment spread",
+			body:       `{"query":"fragment F on Mutation { sendPasscode(email: \"a@b.com\") { success } } mutation { ...F }"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "no-user",
+		},
+		{
+			name:       "protected mutation via named fragment spread",
+			body:       `{"query":"fragment F on Mutation { deleteAccount { success } } mutation { ...F }"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "oversized body without token",
+			body:       `{"query":"` + strings.Repeat("x", 2<<20) + `"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
 	}
 
 	for _, tt := range tests {

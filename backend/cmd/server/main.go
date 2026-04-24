@@ -42,6 +42,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to create token service: %v", err)
 		}
+	} else if cfg.Env != config.EnvDevelopment {
+		log.Fatal("JWT_PRIVATE_KEY is required in non-development environments")
 	}
 
 	var tokenIssuer auth.TokenIssuer
