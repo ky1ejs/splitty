@@ -16,7 +16,7 @@ backend/graph/model/models_gen.go
 backend/server
 
 # Environment
-.env
+backend/.env
 
 # Web app
 web/node_modules/
