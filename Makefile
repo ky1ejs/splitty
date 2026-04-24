@@ -1,3 +1,6 @@
+-include .env
+export
+
 .PHONY: gqlgen docker-up docker-down db-create run test web-install web-codegen web-dev web-build
 
 gqlgen:
