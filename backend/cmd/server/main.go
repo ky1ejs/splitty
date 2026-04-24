@@ -42,6 +42,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to create token service: %v", err)
 		}
+	} else if cfg.Env != config.EnvDevelopment {
+		log.Fatal("JWT_PRIVATE_KEY is required in non-development environments")
 	}
 
 	var tokenIssuer auth.TokenIssuer
@@ -69,7 +71,12 @@ func main() {
 	if cfg.Env == config.EnvDevelopment {
 		http.Handle("/", playground.Handler("Splitty", "/query"))
 	}
-	http.Handle("/query", srv)
+
+	var queryHandler http.Handler = srv
+	if tokenService != nil {
+		queryHandler = auth.Middleware(tokenService)(srv)
+	}
+	http.Handle("/query", queryHandler)
 
 	port := "8080"
 	if cfg.Env == config.EnvDevelopment {

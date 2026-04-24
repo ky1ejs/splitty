@@ -5,11 +5,25 @@ import (
 	"errors"
 )
 
+type contextKey struct{}
+
+var ctxKey contextKey
+
+// UserIDFromContext extracts the authenticated user's ID from the context.
+func UserIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(ctxKey).(string)
+	return id, ok
+}
+
+func withUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, ctxKey, userID)
+}
+
 var (
-	ErrUnavailable    = errors.New("email passcode is not available")
-	ErrInvalidEmail   = errors.New("invalid email address")
-	ErrEmailRequired  = errors.New("email is required")
-	ErrCodeRequired   = errors.New("code is required")
+	ErrUnavailable   = errors.New("email passcode is not available")
+	ErrInvalidEmail  = errors.New("invalid email address")
+	ErrEmailRequired = errors.New("email is required")
+	ErrCodeRequired  = errors.New("code is required")
 )
 
 // TokenIssuer generates access and refresh tokens for a user.
