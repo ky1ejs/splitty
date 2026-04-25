@@ -191,3 +191,131 @@ func TestMiddleware(t *testing.T) {
 		})
 	}
 }
+
+func TestParseDevAccessToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		token   string
+		wantID  string
+		wantOK  bool
+	}{
+		{
+			name:   "valid dev token with UUID",
+			token:  "dev-access-550e8400-e29b-41d4-a716-446655440000-abcdef1234567890abcdef1234567890",
+			wantID: "550e8400-e29b-41d4-a716-446655440000",
+			wantOK: true,
+		},
+		{
+			name:   "valid dev token with simple ID",
+			token:  "dev-access-user123-aabbccdd",
+			wantID: "user123",
+			wantOK: true,
+		},
+		{
+			name:   "not a dev token",
+			token:  "some.jwt.token",
+			wantID: "",
+			wantOK: false,
+		},
+		{
+			name:   "empty string",
+			token:  "",
+			wantID: "",
+			wantOK: false,
+		},
+		{
+			name:   "prefix only",
+			token:  "dev-access-",
+			wantID: "",
+			wantOK: false,
+		},
+		{
+			name:   "no hex suffix",
+			token:  "dev-access-userid",
+			wantID: "",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotOK := parseDevAccessToken(tt.token)
+			if gotOK != tt.wantOK {
+				t.Errorf("parseDevAccessToken(%q) ok = %v, want %v", tt.token, gotOK, tt.wantOK)
+			}
+			if gotID != tt.wantID {
+				t.Errorf("parseDevAccessToken(%q) id = %q, want %q", tt.token, gotID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestDevMiddleware(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid, ok := UserIDFromContext(r.Context())
+		if ok {
+			w.Write([]byte(uid))
+		} else {
+			w.Write([]byte("no-user"))
+		}
+	})
+
+	mw := DevMiddleware()(handler)
+
+	tests := []struct {
+		name       string
+		auth       string
+		body       string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "valid dev token on protected query",
+			auth:       "Bearer dev-access-user-123-aabbccdd",
+			body:       `{"query":"{ me { id } }"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "user-123",
+		},
+		{
+			name:       "invalid dev token",
+			auth:       "Bearer not-a-dev-token",
+			body:       `{"query":"{ me { id } }"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "missing token on protected query",
+			body:       `{"query":"{ me { id } }"}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "public mutation without token",
+			body:       `{"query":"mutation { sendPasscode(email: \"a@b.com\") { success } }"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "no-user",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/query", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			if tt.auth != "" {
+				req.Header.Set("Authorization", tt.auth)
+			}
+
+			w := httptest.NewRecorder()
+			mw.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				body, _ := io.ReadAll(w.Result().Body)
+				t.Errorf("got status %d, want %d (body: %s)", w.Code, tt.wantStatus, body)
+			}
+			if tt.wantBody != "" {
+				got := w.Body.String()
+				if got != tt.wantBody {
+					t.Errorf("got body %q, want %q", got, tt.wantBody)
+				}
+			}
+		})
+	}
+}

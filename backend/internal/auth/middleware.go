@@ -11,6 +11,8 @@ import (
 	"github.com/vektah/gqlparser/v2/parser"
 )
 
+const devAccessTokenPrefix = "dev-access-"
+
 var publicMutations = map[string]bool{
 	"signInWithApple": true,
 	"sendPasscode":    true,
@@ -18,21 +20,45 @@ var publicMutations = map[string]bool{
 	"refreshToken":    true,
 }
 
+// tokenValidator extracts a user ID from a bearer token.
+// Returns the user ID and true on success, or empty string and false on failure.
+type tokenValidator func(token string) (userID string, ok bool)
+
 // Middleware returns HTTP middleware that validates JWT bearer tokens.
 // Public mutations (signInWithApple, sendPasscode, verifyPasscode,
 // refreshToken) are allowed through without authentication.
 func Middleware(ts *TokenService) func(http.Handler) http.Handler {
+	return authMiddleware(func(token string) (string, bool) {
+		claims, err := ts.ValidateAccessToken(token)
+		if err != nil {
+			return "", false
+		}
+		return claims.Subject, true
+	})
+}
+
+// DevMiddleware returns HTTP middleware for development mode that validates
+// dev tokens (format: "dev-access-<userID>-<hex>") without requiring JWT keys.
+// Public mutations are allowed through without a token, same as production.
+func DevMiddleware() func(http.Handler) http.Handler {
+	return authMiddleware(parseDevAccessToken)
+}
+
+// authMiddleware creates HTTP middleware that validates bearer tokens using the
+// given validator. If a token is present and valid, the user ID is injected into
+// the request context. Public mutations are allowed without a token.
+func authMiddleware(validate tokenValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, hasToken := extractBearerToken(r)
 
 			if hasToken {
-				claims, err := ts.ValidateAccessToken(token)
-				if err != nil {
+				userID, ok := validate(token)
+				if !ok {
 					writeUnauthorized(w, "invalid token")
 					return
 				}
-				ctx := withUserID(r.Context(), claims.Subject)
+				ctx := withUserID(r.Context(), userID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -45,6 +71,21 @@ func Middleware(ts *TokenService) func(http.Handler) http.Handler {
 			writeUnauthorized(w, "authorization required")
 		})
 	}
+}
+
+// parseDevAccessToken extracts the user ID from a dev access token.
+// Dev tokens have the format "dev-access-<userID>-<hex>" where the hex
+// suffix is a 32-character random string.
+func parseDevAccessToken(token string) (string, bool) {
+	rest, ok := strings.CutPrefix(token, devAccessTokenPrefix)
+	if !ok || rest == "" {
+		return "", false
+	}
+	lastDash := strings.LastIndex(rest, "-")
+	if lastDash <= 0 {
+		return "", false
+	}
+	return rest[:lastDash], true
 }
 
 func extractBearerToken(r *http.Request) (string, bool) {
