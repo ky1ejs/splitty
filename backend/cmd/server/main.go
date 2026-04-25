@@ -13,6 +13,7 @@ import (
 	"github.com/kylejs/splitty/backend/internal/config"
 	"github.com/kylejs/splitty/backend/internal/cors"
 	"github.com/kylejs/splitty/backend/internal/db"
+	"github.com/kylejs/splitty/backend/internal/group"
 )
 
 func main() {
@@ -55,6 +56,7 @@ func main() {
 	}
 
 	userStore := auth.NewPgUserStore(pool)
+	groupStore := group.NewPgGroupStore(pool)
 
 	passcodeService := auth.NewPasscodeService(
 		cfg.Env,
@@ -68,6 +70,7 @@ func main() {
 			TokenService:    tokenService,
 			PasscodeService: passcodeService,
 			UserStore:       userStore,
+			GroupStore:       groupStore,
 			Config:          cfg,
 		},
 	}))
