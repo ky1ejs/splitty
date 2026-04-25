@@ -40,6 +40,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (meResult.fetching) return;
     if (meResult.data?.me) {
       setUser(meResult.data.me);
+    } else {
+      // Tokens exist but Me returned no user (expired/invalid tokens
+      // that couldn't be refreshed). Clear stale tokens.
+      clearTokens();
     }
     setLoading(false);
   }, [meResult.fetching, meResult.data]);

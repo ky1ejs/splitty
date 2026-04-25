@@ -28,8 +28,10 @@ export const client = new Client({
           return !getAccessToken();
         },
         didAuthError(error) {
-          return error.graphQLErrors.some(
-            (e) => e.extensions?.["code"] === "UNAUTHORIZED",
+          return (
+            error.graphQLErrors.some(
+              (e) => e.extensions?.["code"] === "UNAUTHORIZED",
+            ) || error.response?.status === 401
           );
         },
         async refreshAuth() {

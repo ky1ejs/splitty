@@ -81,6 +81,8 @@ func main() {
 	var queryHandler http.Handler = srv
 	if tokenService != nil {
 		queryHandler = auth.Middleware(tokenService)(srv)
+	} else {
+		queryHandler = auth.DevMiddleware()(srv)
 	}
 	mux.Handle("/query", queryHandler)
 
