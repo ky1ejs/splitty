@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { CombinedError, createClient, Provider } from "urql";
-import { map, pipe } from "wonka";
+import { filter, map, pipe } from "wonka";
 import { describe, expect, it, vi } from "vitest";
 import { HomePage } from "./home";
 import type { Exchange, Operation } from "@urql/core";
@@ -26,6 +26,7 @@ function mockExchange(
   return () => (ops$) =>
     pipe(
       ops$,
+      filter((op) => op.kind !== "teardown"),
       map((op) => ({
         operation: op,
         hasNext: false,

@@ -6,7 +6,7 @@ export function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [result] = useQuery({
     query: GroupQuery,
-    variables: { id: id! },
+    variables: { id: id ?? "" },
     pause: !id,
   });
 

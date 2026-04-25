@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { CombinedError, createClient, Provider } from "urql";
-import { map, pipe } from "wonka";
+import { filter, map, pipe } from "wonka";
 import { describe, expect, it, vi } from "vitest";
 import { GroupDetailPage } from "./group-detail";
 import type { Exchange } from "@urql/core";
@@ -20,6 +20,7 @@ function mockExchange(response: { data?: unknown; error?: CombinedError }): Exch
   return () => (ops$) =>
     pipe(
       ops$,
+      filter((op) => op.kind !== "teardown"),
       map((op) => ({
         operation: op,
         data: response.data,
