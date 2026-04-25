@@ -110,7 +110,7 @@ func (s *PgGroupStore) IsMember(ctx context.Context, groupID, userID string) (bo
 // Returns the set of IDs that are NOT members.
 func (s *PgGroupStore) AreMembers(ctx context.Context, groupID string, userIDs []string) (nonMembers []string, err error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2)`,
+		`SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])`,
 		groupID, userIDs,
 	)
 	if err != nil {
@@ -177,7 +177,7 @@ func (s *PgGroupStore) GetMembers(ctx context.Context, groupID string) ([]string
 }
 
 // CreateTransaction inserts a transaction and its splits within a database transaction.
-// All splitBetween users must be members of the group.
+// Callers are responsible for verifying that splitBetween users are group members.
 func (s *PgGroupStore) CreateTransaction(ctx context.Context, groupID, description string, amount int64, paidBy string, splitBetween []string) (*TransactionRecord, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -196,7 +196,12 @@ func (s *PgGroupStore) CreateTransaction(ctx context.Context, groupID, descripti
 		return nil, fmt.Errorf("create transaction: insert: %w", err)
 	}
 
+	seen := make(map[string]bool, len(splitBetween))
 	for _, userID := range splitBetween {
+		if seen[userID] {
+			continue
+		}
+		seen[userID] = true
 		_, err = tx.Exec(ctx,
 			`INSERT INTO transaction_splits (transaction_id, user_id) VALUES ($1, $2)`,
 			t.ID, userID,

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/kylejs/splitty/backend/graph/model"
 	"github.com/kylejs/splitty/backend/internal/auth"
 	"github.com/kylejs/splitty/backend/internal/group"
@@ -132,7 +133,10 @@ func (r *mutationResolver) AddMemberToGroup(ctx context.Context, groupID string,
 	}
 
 	if _, err := r.UserStore.GetByID(ctx, userID); err != nil {
-		return nil, fmt.Errorf("user not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("look up user: %w", err)
 	}
 
 	if err := r.GroupStore.AddMember(ctx, groupID, userID); err != nil {
@@ -192,7 +196,7 @@ func (r *mutationResolver) DeleteTransaction(ctx context.Context, id string) (bo
 	}
 
 	if _, err := r.requireGroupMember(ctx, t.GroupID); err != nil {
-		return false, err
+		return false, fmt.Errorf("transaction not found")
 	}
 
 	if err := r.GroupStore.DeleteTransaction(ctx, id); err != nil {

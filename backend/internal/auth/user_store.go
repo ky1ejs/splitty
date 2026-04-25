@@ -33,7 +33,9 @@ func (s *PgUserStore) GetByID(ctx context.Context, id string) (*UserRecord, erro
 // GetByIDs returns users matching the given IDs.
 func (s *PgUserStore) GetByIDs(ctx context.Context, ids []string) ([]*UserRecord, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, email, display_name FROM users WHERE id = ANY($1)`,
+		`SELECT id, email, display_name FROM users
+		 WHERE id = ANY($1::uuid[])
+		 ORDER BY array_position($1::uuid[], id)`,
 		ids,
 	)
 	if err != nil {
