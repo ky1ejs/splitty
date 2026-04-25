@@ -30,6 +30,30 @@ func (s *PgUserStore) GetByID(ctx context.Context, id string) (*UserRecord, erro
 	return &u, nil
 }
 
+// GetByIDs returns users matching the given IDs.
+func (s *PgUserStore) GetByIDs(ctx context.Context, ids []string) ([]*UserRecord, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, email, display_name FROM users
+		 WHERE id = ANY($1::uuid[])
+		 ORDER BY array_position($1::uuid[], id)`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get users by ids: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*UserRecord
+	for rows.Next() {
+		var u UserRecord
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName); err != nil {
+			return nil, fmt.Errorf("get users by ids: scan: %w", err)
+		}
+		users = append(users, &u)
+	}
+	return users, rows.Err()
+}
+
 func (s *PgUserStore) UpsertByEmail(ctx context.Context, email string) (*UserRecord, error) {
 	var u UserRecord
 	err := s.pool.QueryRow(ctx,

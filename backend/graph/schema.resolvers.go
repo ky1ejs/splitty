@@ -11,9 +11,37 @@ import (
 	"fmt"
 	"log"
 
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/kylejs/splitty/backend/graph/model"
 	"github.com/kylejs/splitty/backend/internal/auth"
+	"github.com/kylejs/splitty/backend/internal/group"
 )
+
+// Members is the resolver for the members field.
+func (r *groupResolver) Members(ctx context.Context, obj *model.Group) ([]*model.User, error) {
+	ids, err := r.GroupStore.GetMembers(ctx, obj.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load members: %w", err)
+	}
+	records, err := r.UserStore.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load members: %w", err)
+	}
+	users := make([]*model.User, len(records))
+	for i, u := range records {
+		users[i] = userRecordToModel(u)
+	}
+	return users, nil
+}
+
+// CreatedBy is the resolver for the createdBy field.
+func (r *groupResolver) CreatedBy(ctx context.Context, obj *model.Group) (*model.User, error) {
+	u, err := r.UserStore.GetByID(ctx, obj.CreatedByID)
+	if err != nil {
+		return nil, fmt.Errorf("load group creator: %w", err)
+	}
+	return userRecordToModel(u), nil
+}
 
 // SignInWithApple is the resolver for the signInWithApple field.
 func (r *mutationResolver) SignInWithApple(ctx context.Context, identityToken string) (*model.AuthResponse, error) {
@@ -43,11 +71,7 @@ func (r *mutationResolver) VerifyPasscode(ctx context.Context, email string, cod
 	return &model.AuthResponse{
 		AccessToken:  result.AccessToken,
 		RefreshToken: result.RefreshToken,
-		User: &model.User{
-			ID:          result.User.ID,
-			Email:       result.User.Email,
-			DisplayName: result.User.DisplayName,
-		},
+		User:         userRecordToModel(result.User),
 	}, nil
 }
 
@@ -84,12 +108,101 @@ func (r *mutationResolver) RefreshToken(ctx context.Context, refreshToken string
 	return &model.AuthResponse{
 		AccessToken:  newAccess,
 		RefreshToken: newRefresh,
-		User: &model.User{
-			ID:          user.ID,
-			Email:       user.Email,
-			DisplayName: user.DisplayName,
-		},
+		User:         userRecordToModel(user),
 	}, nil
+}
+
+// CreateGroup is the resolver for the createGroup field.
+func (r *mutationResolver) CreateGroup(ctx context.Context, input model.CreateGroupInput) (*model.Group, error) {
+	userID, err := r.requireAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	g, err := r.GroupStore.CreateGroup(ctx, input.Name, userID)
+	if err != nil {
+		return nil, fmt.Errorf("create group: %w", err)
+	}
+	return groupRecordToModel(g), nil
+}
+
+// AddMemberToGroup is the resolver for the addMemberToGroup field.
+func (r *mutationResolver) AddMemberToGroup(ctx context.Context, groupID string, userID string) (*model.Group, error) {
+	if _, err := r.requireGroupMember(ctx, groupID); err != nil {
+		return nil, err
+	}
+
+	if _, err := r.UserStore.GetByID(ctx, userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("look up user: %w", err)
+	}
+
+	if err := r.GroupStore.AddMember(ctx, groupID, userID); err != nil {
+		if errors.Is(err, group.ErrAlreadyMember) {
+			return nil, fmt.Errorf("user is already a member of this group")
+		}
+		return nil, fmt.Errorf("add member: %w", err)
+	}
+
+	g, err := r.GroupStore.GetByID(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("load group: %w", err)
+	}
+	return groupRecordToModel(g), nil
+}
+
+// CreateTransaction is the resolver for the createTransaction field.
+func (r *mutationResolver) CreateTransaction(ctx context.Context, input model.CreateTransactionInput) (*model.Transaction, error) {
+	_, err := r.requireGroupMember(ctx, input.GroupID)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.Amount <= 0 {
+		return nil, fmt.Errorf("amount must be positive")
+	}
+	if len(input.SplitBetween) == 0 {
+		return nil, fmt.Errorf("splitBetween must include at least one user")
+	}
+
+	// The payer is the authenticated user.
+	payerID, _ := auth.UserIDFromContext(ctx)
+
+	nonMembers, err := r.GroupStore.AreMembers(ctx, input.GroupID, input.SplitBetween)
+	if err != nil {
+		return nil, fmt.Errorf("check memberships: %w", err)
+	}
+	if len(nonMembers) > 0 {
+		return nil, fmt.Errorf("user %s is not a member of this group", nonMembers[0])
+	}
+
+	t, err := r.GroupStore.CreateTransaction(ctx, input.GroupID, input.Description, int64(input.Amount), payerID, input.SplitBetween)
+	if err != nil {
+		return nil, fmt.Errorf("create transaction: %w", err)
+	}
+	return txnRecordToModel(t), nil
+}
+
+// DeleteTransaction is the resolver for the deleteTransaction field.
+func (r *mutationResolver) DeleteTransaction(ctx context.Context, id string) (bool, error) {
+	t, err := r.GroupStore.GetTransaction(ctx, id)
+	if err != nil {
+		if errors.Is(err, group.ErrNotFound) {
+			return false, fmt.Errorf("transaction not found")
+		}
+		return false, fmt.Errorf("load transaction: %w", err)
+	}
+
+	if _, err := r.requireGroupMember(ctx, t.GroupID); err != nil {
+		return false, fmt.Errorf("transaction not found")
+	}
+
+	if err := r.GroupStore.DeleteTransaction(ctx, id); err != nil {
+		return false, fmt.Errorf("delete transaction: %w", err)
+	}
+	return true, nil
 }
 
 // Me is the resolver for the me field.
@@ -105,12 +218,81 @@ func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
 		return nil, fmt.Errorf("failed to load user")
 	}
 
-	return &model.User{
-		ID:          user.ID,
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-	}, nil
+	return userRecordToModel(user), nil
 }
+
+// Groups is the resolver for the groups field.
+func (r *queryResolver) Groups(ctx context.Context) ([]*model.Group, error) {
+	userID, err := r.requireAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	records, err := r.GroupStore.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list groups: %w", err)
+	}
+
+	groups := make([]*model.Group, len(records))
+	for i, g := range records {
+		groups[i] = groupRecordToModel(g)
+	}
+	return groups, nil
+}
+
+// Group is the resolver for the group field.
+func (r *queryResolver) Group(ctx context.Context, id string) (*model.Group, error) {
+	if _, err := r.requireGroupMember(ctx, id); err != nil {
+		return nil, err
+	}
+
+	g, err := r.GroupStore.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, group.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load group: %w", err)
+	}
+	return groupRecordToModel(g), nil
+}
+
+// Group is the resolver for the group field.
+func (r *transactionResolver) Group(ctx context.Context, obj *model.Transaction) (*model.Group, error) {
+	g, err := r.GroupStore.GetByID(ctx, obj.GroupID)
+	if err != nil {
+		return nil, fmt.Errorf("load transaction group: %w", err)
+	}
+	return groupRecordToModel(g), nil
+}
+
+// PaidBy is the resolver for the paidBy field.
+func (r *transactionResolver) PaidBy(ctx context.Context, obj *model.Transaction) (*model.User, error) {
+	u, err := r.UserStore.GetByID(ctx, obj.PaidByID)
+	if err != nil {
+		return nil, fmt.Errorf("load payer: %w", err)
+	}
+	return userRecordToModel(u), nil
+}
+
+// SplitBetween is the resolver for the splitBetween field.
+func (r *transactionResolver) SplitBetween(ctx context.Context, obj *model.Transaction) ([]*model.User, error) {
+	ids, err := r.GroupStore.GetSplitUserIDs(ctx, obj.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load split users: %w", err)
+	}
+	records, err := r.UserStore.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load split users: %w", err)
+	}
+	users := make([]*model.User, len(records))
+	for i, u := range records {
+		users[i] = userRecordToModel(u)
+	}
+	return users, nil
+}
+
+// Group returns GroupResolver implementation.
+func (r *Resolver) Group() GroupResolver { return &groupResolver{r} }
 
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
@@ -118,5 +300,10 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Transaction returns TransactionResolver implementation.
+func (r *Resolver) Transaction() TransactionResolver { return &transactionResolver{r} }
+
+type groupResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type transactionResolver struct{ *Resolver }

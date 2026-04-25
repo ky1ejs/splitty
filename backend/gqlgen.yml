@@ -19,3 +19,21 @@ models:
   ID:
     model:
       - github.com/99designs/gqlgen/graphql.ID
+  Group:
+    model:
+      - github.com/kylejs/splitty/backend/graph/model.Group
+    fields:
+      members:
+        resolver: true
+      createdBy:
+        resolver: true
+  Transaction:
+    model:
+      - github.com/kylejs/splitty/backend/graph/model.Transaction
+    fields:
+      group:
+        resolver: true
+      paidBy:
+        resolver: true
+      splitBetween:
+        resolver: true

@@ -14,14 +14,56 @@ type SendPasscodeResponse {
   success: Boolean!
 }
 
+type Group {
+  id: ID!
+  name: String!
+  members: [User!]!
+  createdBy: User!
+  createdAt: String!
+}
+
+type Transaction {
+  id: ID!
+  group: Group!
+  description: String!
+  "Amount in cents."
+  amount: Int!
+  paidBy: User!
+  splitBetween: [User!]!
+  createdAt: String!
+}
+
+input CreateGroupInput {
+  name: String!
+}
+
+input CreateTransactionInput {
+  groupId: ID!
+  description: String!
+  "Amount in cents."
+  amount: Int!
+  splitBetween: [ID!]!
+}
+
 type Mutation {
   signInWithApple(identityToken: String!): AuthResponse!
   sendPasscode(email: String!): SendPasscodeResponse!
   verifyPasscode(email: String!, code: String!): AuthResponse!
   refreshToken(refreshToken: String!): AuthResponse!
+
+  createGroup(input: CreateGroupInput!): Group!
+  addMemberToGroup(groupId: ID!, userId: ID!): Group!
+  createTransaction(input: CreateTransactionInput!): Transaction!
+  deleteTransaction(id: ID!): Boolean!
 }
 
 type Query {
   "Returns the currently authenticated user."
   me: User
+
+  "Returns all groups the authenticated user belongs to."
+  groups: [Group!]!
+
+  "Returns a specific group by ID. Requires membership."
+  group(id: ID!): Group
 }
