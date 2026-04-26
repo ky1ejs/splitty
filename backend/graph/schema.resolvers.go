@@ -26,7 +26,7 @@ func (r *groupResolver) Members(ctx context.Context, obj *model.Group) ([]*model
 		return nil, fmt.Errorf("load members: %w", err)
 	}
 	if len(ids) == 0 {
-		return nil, nil
+		return []*model.User{}, nil
 	}
 	records, err := loaders.UserLoader.LoadAll(ctx, ids)
 	if err != nil {
@@ -287,7 +287,7 @@ func (r *transactionResolver) SplitBetween(ctx context.Context, obj *model.Trans
 		return nil, fmt.Errorf("load split users: %w", err)
 	}
 	if len(ids) == 0 {
-		return nil, nil
+		return []*model.User{}, nil
 	}
 	records, err := loaders.UserLoader.LoadAll(ctx, ids)
 	if err != nil {
