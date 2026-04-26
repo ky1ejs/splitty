@@ -273,6 +273,77 @@ func (s *PgGroupStore) DeleteTransaction(ctx context.Context, transactionID stri
 	return nil
 }
 
+// GetByIDs returns groups matching the given IDs, ordered to match the input slice.
+func (s *PgGroupStore) GetByIDs(ctx context.Context, ids []string) ([]*GroupRecord, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, created_by, created_at FROM groups
+		 WHERE id = ANY($1::uuid[])
+		 ORDER BY array_position($1::uuid[], id)`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get groups by ids: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []*GroupRecord
+	for rows.Next() {
+		var g GroupRecord
+		if err := rows.Scan(&g.ID, &g.Name, &g.CreatedBy, &g.CreatedAt); err != nil {
+			return nil, fmt.Errorf("get groups by ids: scan: %w", err)
+		}
+		groups = append(groups, &g)
+	}
+	return groups, rows.Err()
+}
+
+// GetMembersByGroupIDs returns member user IDs for each of the given group IDs.
+func (s *PgGroupStore) GetMembersByGroupIDs(ctx context.Context, groupIDs []string) (map[string][]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT group_id, user_id FROM group_members
+		 WHERE group_id = ANY($1::uuid[])
+		 ORDER BY group_id, added_at`,
+		groupIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get members by group ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]string, len(groupIDs))
+	for rows.Next() {
+		var groupID, userID string
+		if err := rows.Scan(&groupID, &userID); err != nil {
+			return nil, fmt.Errorf("get members by group ids: scan: %w", err)
+		}
+		result[groupID] = append(result[groupID], userID)
+	}
+	return result, rows.Err()
+}
+
+// GetSplitUserIDsByTransactionIDs returns split user IDs for each of the given transaction IDs.
+func (s *PgGroupStore) GetSplitUserIDsByTransactionIDs(ctx context.Context, txnIDs []string) (map[string][]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT transaction_id, user_id FROM transaction_splits
+		 WHERE transaction_id = ANY($1::uuid[])`,
+		txnIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get split user ids by transaction ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]string, len(txnIDs))
+	for rows.Next() {
+		var txnID, userID string
+		if err := rows.Scan(&txnID, &userID); err != nil {
+			return nil, fmt.Errorf("get split user ids by transaction ids: scan: %w", err)
+		}
+		result[txnID] = append(result[txnID], userID)
+	}
+	return result, rows.Err()
+}
+
 // GetSplitUserIDs returns the user IDs in a transaction's split.
 func (s *PgGroupStore) GetSplitUserIDs(ctx context.Context, transactionID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx,
