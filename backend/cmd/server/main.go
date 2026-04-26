@@ -78,6 +78,14 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if err := pool.Ping(r.Context()); err != nil {
+			http.Error(w, "db unreachable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
 	if cfg.Env == config.EnvDevelopment {
 		mux.Handle("/", playground.Handler("Splitty", "/query"))
 	}
