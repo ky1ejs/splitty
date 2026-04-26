@@ -3,9 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
-
-	"github.com/kylejs/splitty/backend/internal/config"
+	"time"
 )
 
 // --- mocks ---
@@ -24,6 +25,67 @@ type mockTokenIssuer struct {
 
 func (m *mockTokenIssuer) IssueTokens(ctx context.Context, userID, email string) (string, string, error) {
 	return m.issueFn(ctx, userID, email)
+}
+
+type passcodeRow struct {
+	codeHash   string
+	expiresAt  time.Time
+	consumedAt time.Time
+	createdAt  time.Time
+}
+
+type memPasscodeStore struct {
+	mu      sync.Mutex
+	byEmail map[string][]*passcodeRow
+}
+
+func newMemStore() *memPasscodeStore {
+	return &memPasscodeStore{byEmail: map[string][]*passcodeRow{}}
+}
+
+func (s *memPasscodeStore) Create(_ context.Context, email, codeHash string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byEmail[email] = append(s.byEmail[email], &passcodeRow{
+		codeHash:  codeHash,
+		expiresAt: expiresAt,
+		createdAt: time.Now(),
+	})
+	return nil
+}
+
+func (s *memPasscodeStore) LastIssuedAt(_ context.Context, email string) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := s.byEmail[email]
+	if len(rows) == 0 {
+		return time.Time{}, nil
+	}
+	return rows[len(rows)-1].createdAt, nil
+}
+
+func (s *memPasscodeStore) ConsumeMatching(_ context.Context, email, codeHash string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := s.byEmail[email]
+	for i := len(rows) - 1; i >= 0; i-- {
+		r := rows[i]
+		if r.codeHash == codeHash && r.consumedAt.IsZero() && r.expiresAt.After(now) {
+			r.consumedAt = now
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+type captureSender struct {
+	to, subject, body string
+	err               error
+}
+
+func (c *captureSender) Send(_ context.Context, to, subject, body string) error {
+	c.to, c.subject, c.body = to, subject, body
+	return c.err
 }
 
 // --- helpers ---
@@ -50,34 +112,45 @@ func happyTokens() *mockTokenIssuer {
 	}
 }
 
+func newSvc(users UserStore, tokens TokenIssuer, store PasscodeStore, sender *captureSender) *PasscodeService {
+	if sender == nil {
+		sender = &captureSender{}
+	}
+	return NewPasscodeService(users, tokens, store, sender)
+}
+
+// extractCode pulls the 6-digit code out of the email body our service writes.
+func extractCode(body string) string {
+	const marker = "code is "
+	i := strings.Index(body, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := body[i+len(marker):]
+	if len(rest) < 6 {
+		return ""
+	}
+	return rest[:6]
+}
+
 // --- SendPasscode tests ---
 
-func TestSendPasscode_Dev_OK(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
-	err := svc.SendPasscode(context.Background(), "alice@example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestSendPasscode_OK(t *testing.T) {
+	sender := &captureSender{}
+	svc := newSvc(happyStore(), happyTokens(), newMemStore(), sender)
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("send: %v", err)
 	}
-}
-
-func TestSendPasscode_Prod_Unavailable(t *testing.T) {
-	svc := NewPasscodeService(config.EnvProduction, happyStore(), happyTokens())
-	err := svc.SendPasscode(context.Background(), "alice@example.com")
-	if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("expected ErrUnavailable, got %v", err)
+	if sender.to != "alice@example.com" {
+		t.Errorf("expected to=alice@example.com, got %q", sender.to)
 	}
-}
-
-func TestSendPasscode_UnknownEnv_Unavailable(t *testing.T) {
-	svc := NewPasscodeService("staging", happyStore(), happyTokens())
-	err := svc.SendPasscode(context.Background(), "alice@example.com")
-	if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("expected ErrUnavailable, got %v", err)
+	if extractCode(sender.body) == "" {
+		t.Errorf("expected 6-digit code in body, got %q", sender.body)
 	}
 }
 
 func TestSendPasscode_EmptyEmail(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	svc := newSvc(happyStore(), happyTokens(), newMemStore(), nil)
 	err := svc.SendPasscode(context.Background(), "")
 	if !errors.Is(err, ErrEmailRequired) {
 		t.Errorf("expected ErrEmailRequired, got %v", err)
@@ -85,48 +158,107 @@ func TestSendPasscode_EmptyEmail(t *testing.T) {
 }
 
 func TestSendPasscode_InvalidEmail(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	svc := newSvc(happyStore(), happyTokens(), newMemStore(), nil)
 	err := svc.SendPasscode(context.Background(), "not-an-email")
 	if !errors.Is(err, ErrInvalidEmail) {
 		t.Errorf("expected ErrInvalidEmail, got %v", err)
 	}
 }
 
-// --- VerifyPasscode tests ---
-
-func TestVerifyPasscode_Dev_OK(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
-	result, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestSendPasscode_RateLimited(t *testing.T) {
+	store := newMemStore()
+	svc := newSvc(happyStore(), happyTokens(), store, nil)
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("first send: %v", err)
 	}
-	if result.AccessToken != "access-tok" {
-		t.Errorf("expected access token %q, got %q", "access-tok", result.AccessToken)
-	}
-	if result.RefreshToken != "refresh-tok" {
-		t.Errorf("expected refresh token %q, got %q", "refresh-tok", result.RefreshToken)
-	}
-	if result.User == nil {
-		t.Fatal("expected non-nil user")
-	}
-	if result.User.ID != "user-123" {
-		t.Errorf("expected user id %q, got %q", "user-123", result.User.ID)
-	}
-	if result.User.Email != "alice@example.com" {
-		t.Errorf("expected user email %q, got %q", "alice@example.com", result.User.Email)
+	err := svc.SendPasscode(context.Background(), "alice@example.com")
+	if !errors.Is(err, ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got %v", err)
 	}
 }
 
-func TestVerifyPasscode_Prod_Unavailable(t *testing.T) {
-	svc := NewPasscodeService(config.EnvProduction, happyStore(), happyTokens())
-	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
-	if !errors.Is(err, ErrUnavailable) {
-		t.Errorf("expected ErrUnavailable, got %v", err)
+func TestSendPasscode_AfterRateLimit(t *testing.T) {
+	store := newMemStore()
+	svc := newSvc(happyStore(), happyTokens(), store, nil)
+	now := time.Now()
+	svc.now = func() time.Time { return now }
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+	// Override stored createdAt to be in the past.
+	store.byEmail["alice@example.com"][0].createdAt = now.Add(-2 * passcodeRateLimit)
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("second send: %v", err)
+	}
+}
+
+// --- VerifyPasscode tests ---
+
+func TestVerifyPasscode_OK(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{}
+	svc := newSvc(happyStore(), happyTokens(), store, sender)
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	code := extractCode(sender.body)
+	result, err := svc.VerifyPasscode(context.Background(), "alice@example.com", code)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if result.AccessToken != "access-tok" {
+		t.Errorf("expected access token, got %q", result.AccessToken)
+	}
+	if result.User == nil || result.User.ID != "user-123" {
+		t.Errorf("unexpected user: %+v", result.User)
+	}
+}
+
+func TestVerifyPasscode_BadCode(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{}
+	svc := newSvc(happyStore(), happyTokens(), store, sender)
+	_ = svc.SendPasscode(context.Background(), "alice@example.com")
+
+	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "999999")
+	if !errors.Is(err, ErrInvalidCode) {
+		t.Errorf("expected ErrInvalidCode, got %v", err)
+	}
+}
+
+func TestVerifyPasscode_Reuse(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{}
+	svc := newSvc(happyStore(), happyTokens(), store, sender)
+	_ = svc.SendPasscode(context.Background(), "alice@example.com")
+	code := extractCode(sender.body)
+
+	if _, err := svc.VerifyPasscode(context.Background(), "alice@example.com", code); err != nil {
+		t.Fatalf("first verify: %v", err)
+	}
+	if _, err := svc.VerifyPasscode(context.Background(), "alice@example.com", code); !errors.Is(err, ErrInvalidCode) {
+		t.Errorf("expected ErrInvalidCode on reuse, got %v", err)
+	}
+}
+
+func TestVerifyPasscode_Expired(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{}
+	svc := newSvc(happyStore(), happyTokens(), store, sender)
+	now := time.Now()
+	svc.now = func() time.Time { return now }
+	_ = svc.SendPasscode(context.Background(), "alice@example.com")
+	code := extractCode(sender.body)
+
+	// Jump past TTL.
+	svc.now = func() time.Time { return now.Add(passcodeTTL + time.Second) }
+	if _, err := svc.VerifyPasscode(context.Background(), "alice@example.com", code); !errors.Is(err, ErrInvalidCode) {
+		t.Errorf("expected ErrInvalidCode for expired code, got %v", err)
 	}
 }
 
 func TestVerifyPasscode_EmptyEmail(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	svc := newSvc(happyStore(), happyTokens(), newMemStore(), nil)
 	_, err := svc.VerifyPasscode(context.Background(), "", "123456")
 	if !errors.Is(err, ErrEmailRequired) {
 		t.Errorf("expected ErrEmailRequired, got %v", err)
@@ -134,7 +266,7 @@ func TestVerifyPasscode_EmptyEmail(t *testing.T) {
 }
 
 func TestVerifyPasscode_EmptyCode(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	svc := newSvc(happyStore(), happyTokens(), newMemStore(), nil)
 	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "")
 	if !errors.Is(err, ErrCodeRequired) {
 		t.Errorf("expected ErrCodeRequired, got %v", err)
@@ -142,7 +274,7 @@ func TestVerifyPasscode_EmptyCode(t *testing.T) {
 }
 
 func TestVerifyPasscode_InvalidEmail(t *testing.T) {
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), happyTokens())
+	svc := newSvc(happyStore(), happyTokens(), newMemStore(), nil)
 	_, err := svc.VerifyPasscode(context.Background(), "bad", "123456")
 	if !errors.Is(err, ErrInvalidEmail) {
 		t.Errorf("expected ErrInvalidEmail, got %v", err)
@@ -150,45 +282,56 @@ func TestVerifyPasscode_InvalidEmail(t *testing.T) {
 }
 
 func TestVerifyPasscode_StoreError(t *testing.T) {
-	store := &mockUserStore{
+	store := newMemStore()
+	sender := &captureSender{}
+	users := &mockUserStore{
 		upsertFn: func(_ context.Context, _ string) (*UserRecord, error) {
 			return nil, errors.New("db down")
 		},
 	}
-	svc := NewPasscodeService(config.EnvDevelopment, store, happyTokens())
-	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
-	if err == nil {
+	svc := newSvc(users, happyTokens(), store, sender)
+	_ = svc.SendPasscode(context.Background(), "alice@example.com")
+	code := extractCode(sender.body)
+	if _, err := svc.VerifyPasscode(context.Background(), "alice@example.com", code); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestVerifyPasscode_TokenError(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{}
 	tokens := &mockTokenIssuer{
 		issueFn: func(_ context.Context, _, _ string) (string, string, error) {
 			return "", "", errors.New("token failure")
 		},
 	}
-	svc := NewPasscodeService(config.EnvDevelopment, happyStore(), tokens)
-	_, err := svc.VerifyPasscode(context.Background(), "alice@example.com", "123456")
-	if err == nil {
+	svc := newSvc(happyStore(), tokens, store, sender)
+	_ = svc.SendPasscode(context.Background(), "alice@example.com")
+	code := extractCode(sender.body)
+	if _, err := svc.VerifyPasscode(context.Background(), "alice@example.com", code); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestVerifyPasscode_EmailNormalization(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{}
 	var captured string
-	store := &mockUserStore{
+	users := &mockUserStore{
 		upsertFn: func(_ context.Context, email string) (*UserRecord, error) {
 			captured = email
 			return testUser, nil
 		},
 	}
-	svc := NewPasscodeService(config.EnvDevelopment, store, happyTokens())
-	_, err := svc.VerifyPasscode(context.Background(), "  Alice@Example.COM  ", "123456")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	svc := newSvc(users, happyTokens(), store, sender)
+	if err := svc.SendPasscode(context.Background(), "  Alice@Example.COM  "); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	code := extractCode(sender.body)
+	if _, err := svc.VerifyPasscode(context.Background(), "  Alice@Example.COM  ", code); err != nil {
+		t.Fatalf("verify: %v", err)
 	}
 	if captured != "alice@example.com" {
-		t.Errorf("expected normalized email %q, got %q", "alice@example.com", captured)
+		t.Errorf("expected normalized email, got %q", captured)
 	}
 }

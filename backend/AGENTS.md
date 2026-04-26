@@ -58,7 +58,15 @@ Environment variables:
 |---|---|---|
 | `SPLITTY_ENV` | `development` or `production` | `development` |
 | `DATABASE_URL` | Postgres connection string | — |
-| `JWT_PRIVATE_KEY` | RSA private key for JWT signing | — |
+| `JWT_PRIVATE_KEY` | RSA private key for JWT signing (required in production) | — |
+| `CORS_ALLOWED_ORIGIN` | Allowed origin for browser clients | `http://localhost:5173` in dev |
+| `MAILGUN_API_KEY` | Mailgun API key (required in production) | — |
+| `MAILGUN_DOMAIN` | Mailgun sending domain, e.g. `mg.example.com` (required in production) | — |
+| `MAILGUN_FROM` | From address used for passcode emails (required in production) | — |
+
+In development the email sender is replaced with a `LogSender` that writes
+the passcode to standard logs, so Mailgun credentials are not required
+locally.
 
 Local Postgres URL: `postgres://postgres@localhost:5432/splitty_dev?sslmode=disable`
 

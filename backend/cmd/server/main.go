@@ -14,6 +14,7 @@ import (
 	"github.com/kylejs/splitty/backend/internal/config"
 	"github.com/kylejs/splitty/backend/internal/cors"
 	"github.com/kylejs/splitty/backend/internal/db"
+	"github.com/kylejs/splitty/backend/internal/email"
 	"github.com/kylejs/splitty/backend/internal/group"
 )
 
@@ -58,12 +59,19 @@ func main() {
 
 	userStore := auth.NewPgUserStore(pool)
 	groupStore := group.NewPgGroupStore(pool)
+	passcodeStore := auth.NewPgPasscodeStore(pool)
 
-	passcodeService := auth.NewPasscodeService(
-		cfg.Env,
-		userStore,
-		tokenIssuer,
-	)
+	var emailSender email.Sender
+	if cfg.Env == config.EnvProduction {
+		if cfg.MailgunAPIKey == "" || cfg.MailgunDomain == "" || cfg.MailgunFrom == "" {
+			log.Fatal("MAILGUN_API_KEY, MAILGUN_DOMAIN, and MAILGUN_FROM are required in production")
+		}
+		emailSender = email.NewMailgun(cfg.MailgunAPIKey, cfg.MailgunDomain, cfg.MailgunFrom)
+	} else {
+		emailSender = email.LogSender{}
+	}
+
+	passcodeService := auth.NewPasscodeService(userStore, tokenIssuer, passcodeStore, emailSender)
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
 		Resolvers: &graph.Resolver{
