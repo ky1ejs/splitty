@@ -234,6 +234,30 @@ func (s *PgGroupStore) GetTransaction(ctx context.Context, transactionID string)
 	return &t, nil
 }
 
+// ListByGroupIDs returns transactions for each of the given group IDs, keyed by group ID.
+func (s *PgGroupStore) ListByGroupIDs(ctx context.Context, groupIDs []string) (map[string][]*TransactionRecord, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, group_id, description, amount, paid_by, created_at
+		 FROM transactions WHERE group_id = ANY($1::uuid[])
+		 ORDER BY created_at DESC`,
+		groupIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list transactions by group ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]*TransactionRecord, len(groupIDs))
+	for rows.Next() {
+		var t TransactionRecord
+		if err := rows.Scan(&t.ID, &t.GroupID, &t.Description, &t.Amount, &t.PaidBy, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list transactions by group ids: scan: %w", err)
+		}
+		result[t.GroupID] = append(result[t.GroupID], &t)
+	}
+	return result, rows.Err()
+}
+
 // ListByGroup returns all transactions for a group, ordered by creation date descending.
 func (s *PgGroupStore) ListByGroup(ctx context.Context, groupID string) ([]*TransactionRecord, error) {
 	rows, err := s.pool.Query(ctx,

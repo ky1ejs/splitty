@@ -17,6 +17,7 @@ type Loaders struct {
 	UserLoader              *dataloadgen.Loader[string, *auth.UserRecord]
 	GroupLoader             *dataloadgen.Loader[string, *group.GroupRecord]
 	GroupMembersLoader      *dataloadgen.Loader[string, []string]
+	GroupTransactionsLoader *dataloadgen.Loader[string, []*group.TransactionRecord]
 	TransactionSplitsLoader *dataloadgen.Loader[string, []string]
 }
 
@@ -26,6 +27,7 @@ func NewLoaders(userStore *auth.PgUserStore, groupStore *group.PgGroupStore) *Lo
 		UserLoader:              dataloadgen.NewLoader(userFetch(userStore)),
 		GroupLoader:             dataloadgen.NewLoader(groupFetch(groupStore)),
 		GroupMembersLoader:      dataloadgen.NewMappedLoader(groupMembersFetch(groupStore)),
+		GroupTransactionsLoader: dataloadgen.NewMappedLoader(groupTransactionsFetch(groupStore)),
 		TransactionSplitsLoader: dataloadgen.NewMappedLoader(transactionSplitsFetch(groupStore)),
 	}
 }
@@ -103,6 +105,12 @@ func groupFetch(store *group.PgGroupStore) func(context.Context, []string) ([]*g
 func groupMembersFetch(store *group.PgGroupStore) func(context.Context, []string) (map[string][]string, error) {
 	return func(ctx context.Context, keys []string) (map[string][]string, error) {
 		return store.GetMembersByGroupIDs(ctx, keys)
+	}
+}
+
+func groupTransactionsFetch(store *group.PgGroupStore) func(context.Context, []string) (map[string][]*group.TransactionRecord, error) {
+	return func(ctx context.Context, keys []string) (map[string][]*group.TransactionRecord, error) {
+		return store.ListByGroupIDs(ctx, keys)
 	}
 }
 

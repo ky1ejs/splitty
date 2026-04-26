@@ -18,6 +18,7 @@ type Group {
   id: ID!
   name: String!
   members: [User!]!
+  transactions: [Transaction!]!
   createdBy: User!
   createdAt: String!
 }
@@ -52,7 +53,7 @@ type Mutation {
   refreshToken(refreshToken: String!): AuthResponse!
 
   createGroup(input: CreateGroupInput!): Group!
-  addMemberToGroup(groupId: ID!, userId: ID!): Group!
+  addMemberToGroup(groupId: ID!, email: String!): Group!
   createTransaction(input: CreateTransactionInput!): Transaction!
   deleteTransaction(id: ID!): Boolean!
 }

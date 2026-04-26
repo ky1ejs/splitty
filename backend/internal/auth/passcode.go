@@ -33,7 +33,7 @@ func (s *PasscodeService) SendPasscode(_ context.Context, email string) error {
 		return ErrUnavailable
 	}
 
-	email, err := normalizeEmail(email)
+	email, err := NormalizeEmail(email)
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func (s *PasscodeService) VerifyPasscode(ctx context.Context, email, code string
 		return nil, ErrUnavailable
 	}
 
-	email, err := normalizeEmail(email)
+	email, err := NormalizeEmail(email)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +72,8 @@ func (s *PasscodeService) VerifyPasscode(ctx context.Context, email, code string
 	}, nil
 }
 
-// normalizeEmail validates and normalizes an email address.
-func normalizeEmail(raw string) (string, error) {
+// NormalizeEmail validates and normalizes an email address.
+func NormalizeEmail(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", ErrEmailRequired

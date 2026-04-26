@@ -54,6 +54,19 @@ func (s *PgUserStore) GetByIDs(ctx context.Context, ids []string) ([]*UserRecord
 	return users, rows.Err()
 }
 
+// GetByEmail returns the user with the given email, or an error if not found.
+func (s *PgUserStore) GetByEmail(ctx context.Context, email string) (*UserRecord, error) {
+	var u UserRecord
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, display_name FROM users WHERE email = $1`,
+		email,
+	).Scan(&u.ID, &u.Email, &u.DisplayName)
+	if err != nil {
+		return nil, fmt.Errorf("get user by email: %w", err)
+	}
+	return &u, nil
+}
+
 func (s *PgUserStore) UpsertByEmail(ctx context.Context, email string) (*UserRecord, error) {
 	var u UserRecord
 	err := s.pool.QueryRow(ctx,

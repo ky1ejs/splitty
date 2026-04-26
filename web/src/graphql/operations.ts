@@ -78,7 +78,30 @@ export const GroupQuery = graphql(`
         email
         displayName
       }
+      transactions {
+        id
+        description
+        amount
+        paidBy {
+          id
+          displayName
+        }
+        createdAt
+      }
       createdAt
+    }
+  }
+`);
+
+export const AddMemberToGroupMutation = graphql(`
+  mutation AddMemberToGroup($groupId: ID!, $email: String!) {
+    addMemberToGroup(groupId: $groupId, email: $email) {
+      id
+      members {
+        id
+        email
+        displayName
+      }
     }
   }
 `);
