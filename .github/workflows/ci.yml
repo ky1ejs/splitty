@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.backend.outputs.has-changes }}
+      web: ${{ steps.web.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: backend
+        uses: ky1ejs/check-diff-paths-action@v0.3.0
+        with:
+          paths: "^backend\\/.*"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - id: web
+        uses: ky1ejs/check-diff-paths-action@v0.3.0
+        with:
+          paths: "^web\\/.*"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  backend:
+    needs: check-changes
+    if: needs.check-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - name: Generate GraphQL code
+        run: go run github.com/99designs/gqlgen generate
+      - run: go build ./...
+      - run: go test ./...
+
+  web:
+    needs: check-changes
+    if: needs.check-changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run codegen
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
