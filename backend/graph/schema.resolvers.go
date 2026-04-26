@@ -41,7 +41,7 @@ func (r *groupResolver) Members(ctx context.Context, obj *model.Group) ([]*model
 
 // Transactions is the resolver for the transactions field.
 func (r *groupResolver) Transactions(ctx context.Context, obj *model.Group) ([]*model.Transaction, error) {
-	records, err := r.GroupStore.ListByGroup(ctx, obj.ID)
+	records, err := dataloader.For(ctx).GroupTransactionsLoader.Load(ctx, obj.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load transactions: %w", err)
 	}
