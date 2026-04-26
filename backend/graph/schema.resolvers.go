@@ -39,6 +39,19 @@ func (r *groupResolver) Members(ctx context.Context, obj *model.Group) ([]*model
 	return users, nil
 }
 
+// Transactions is the resolver for the transactions field.
+func (r *groupResolver) Transactions(ctx context.Context, obj *model.Group) ([]*model.Transaction, error) {
+	records, err := r.GroupStore.ListByGroup(ctx, obj.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load transactions: %w", err)
+	}
+	txns := make([]*model.Transaction, len(records))
+	for i, t := range records {
+		txns[i] = txnRecordToModel(t)
+	}
+	return txns, nil
+}
+
 // CreatedBy is the resolver for the createdBy field.
 func (r *groupResolver) CreatedBy(ctx context.Context, obj *model.Group) (*model.User, error) {
 	u, err := dataloader.For(ctx).UserLoader.Load(ctx, obj.CreatedByID)
@@ -132,19 +145,20 @@ func (r *mutationResolver) CreateGroup(ctx context.Context, input model.CreateGr
 }
 
 // AddMemberToGroup is the resolver for the addMemberToGroup field.
-func (r *mutationResolver) AddMemberToGroup(ctx context.Context, groupID string, userID string) (*model.Group, error) {
+func (r *mutationResolver) AddMemberToGroup(ctx context.Context, groupID string, email string) (*model.Group, error) {
 	if _, err := r.requireGroupMember(ctx, groupID); err != nil {
 		return nil, err
 	}
 
-	if _, err := r.UserStore.GetByID(ctx, userID); err != nil {
+	user, err := r.UserStore.GetByEmail(ctx, email)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("no user with that email")
 		}
 		return nil, fmt.Errorf("look up user: %w", err)
 	}
 
-	if err := r.GroupStore.AddMember(ctx, groupID, userID); err != nil {
+	if err := r.GroupStore.AddMember(ctx, groupID, user.ID); err != nil {
 		if errors.Is(err, group.ErrAlreadyMember) {
 			return nil, fmt.Errorf("user is already a member of this group")
 		}

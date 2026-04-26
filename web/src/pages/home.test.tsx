@@ -1,11 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { CombinedError, createClient, Provider } from "urql";
-import { filter, map, pipe } from "wonka";
+import { Provider } from "urql";
 import { describe, expect, it, vi } from "vitest";
 import { HomePage } from "./home";
-import type { Exchange, Operation } from "@urql/core";
+import { createTestClient } from "../test-helpers";
 
 const mockLogout = vi.fn();
 const mockUser = { id: "1", email: "test@test.com", displayName: "Test User" };
@@ -19,31 +18,6 @@ vi.mock("../auth/auth-context", () => ({
     login: vi.fn(),
   }),
 }));
-
-function mockExchange(
-  handler: (op: Operation) => { data?: unknown; error?: CombinedError },
-): Exchange {
-  return () => (ops$) =>
-    pipe(
-      ops$,
-      filter((op) => op.kind !== "teardown"),
-      map((op) => ({
-        operation: op,
-        hasNext: false,
-        stale: false,
-        ...handler(op),
-      })),
-    );
-}
-
-function createTestClient(
-  handler: (op: Operation) => { data?: unknown; error?: CombinedError },
-) {
-  return createClient({
-    url: "http://localhost/graphql",
-    exchanges: [mockExchange(handler)],
-  });
-}
 
 function renderWithProviders(
   client: ReturnType<typeof createTestClient>,

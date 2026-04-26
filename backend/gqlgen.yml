@@ -25,6 +25,8 @@ models:
     fields:
       members:
         resolver: true
+      transactions:
+        resolver: true
       createdBy:
         resolver: true
   Transaction:

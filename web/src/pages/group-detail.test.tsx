@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { CombinedError, createClient, Provider } from "urql";
-import { filter, map, pipe } from "wonka";
+import { CombinedError, Provider } from "urql";
 import { describe, expect, it, vi } from "vitest";
 import { GroupDetailPage } from "./group-detail";
-import type { Exchange } from "@urql/core";
+import { createTestClient } from "../test-helpers";
 
 vi.mock("../auth/auth-context", () => ({
   useAuth: () => ({
@@ -15,28 +15,6 @@ vi.mock("../auth/auth-context", () => ({
     login: vi.fn(),
   }),
 }));
-
-function mockExchange(response: { data?: unknown; error?: CombinedError }): Exchange {
-  return () => (ops$) =>
-    pipe(
-      ops$,
-      filter((op) => op.kind !== "teardown"),
-      map((op) => ({
-        operation: op,
-        data: response.data,
-        error: response.error,
-        hasNext: false,
-        stale: false,
-      })),
-    );
-}
-
-function createTestClient(response: { data?: unknown; error?: CombinedError }) {
-  return createClient({
-    url: "http://localhost/graphql",
-    exchanges: [mockExchange(response)],
-  });
-}
 
 function renderAtRoute(
   client: ReturnType<typeof createTestClient>,
@@ -53,37 +31,38 @@ function renderAtRoute(
   );
 }
 
+const groupData = {
+  __typename: "Group" as const,
+  id: "g1",
+  name: "Trip to Paris",
+  createdAt: "2026-01-15T00:00:00Z",
+  createdBy: {
+    __typename: "User" as const,
+    id: "1",
+    displayName: "Test User",
+  },
+  members: [
+    {
+      __typename: "User" as const,
+      id: "1",
+      email: "test@test.com",
+      displayName: "Test User",
+    },
+    {
+      __typename: "User" as const,
+      id: "2",
+      email: "other@test.com",
+      displayName: "Other User",
+    },
+  ],
+  transactions: [] as unknown[],
+};
+
+const groupHandler = () => ({ data: { group: groupData } });
+
 describe("GroupDetailPage", () => {
   it("renders group details", () => {
-    const client = createTestClient({
-      data: {
-        group: {
-          __typename: "Group",
-          id: "g1",
-          name: "Trip to Paris",
-          createdAt: "2026-01-15T00:00:00Z",
-          createdBy: {
-            __typename: "User",
-            id: "1",
-            displayName: "Test User",
-          },
-          members: [
-            {
-              __typename: "User",
-              id: "1",
-              email: "test@test.com",
-              displayName: "Test User",
-            },
-            {
-              __typename: "User",
-              id: "2",
-              email: "other@test.com",
-              displayName: "Other User",
-            },
-          ],
-        },
-      },
-    });
+    const client = createTestClient(groupHandler);
     renderAtRoute(client);
 
     expect(screen.getByText("Trip to Paris")).toBeInTheDocument();
@@ -97,18 +76,20 @@ describe("GroupDetailPage", () => {
   });
 
   it("shows not found when group is null", () => {
-    const client = createTestClient({ data: { group: null } });
+    const client = createTestClient(() => ({
+      data: { group: null },
+    }));
     renderAtRoute(client);
 
     expect(screen.getByText("Group not found.")).toBeInTheDocument();
   });
 
   it("shows error message on query failure", () => {
-    const client = createTestClient({
+    const client = createTestClient(() => ({
       error: new CombinedError({
         networkError: new Error("Not authorized"),
       }),
-    });
+    }));
     renderAtRoute(client);
 
     expect(
@@ -117,25 +98,129 @@ describe("GroupDetailPage", () => {
   });
 
   it("has a back link to the groups list", () => {
-    const client = createTestClient({
-      data: {
-        group: {
-          __typename: "Group",
-          id: "g1",
-          name: "Trip to Paris",
-          createdAt: "2026-01-15T00:00:00Z",
-          createdBy: {
-            __typename: "User",
-            id: "1",
-            displayName: "Test User",
-          },
-          members: [],
-        },
-      },
-    });
+    const client = createTestClient(groupHandler);
     renderAtRoute(client);
 
     const backLink = screen.getByText("\u2190 Back to groups");
     expect(backLink.closest("a")).toHaveAttribute("href", "/");
+  });
+
+  it("shows the add member form", () => {
+    const client = createTestClient(groupHandler);
+    renderAtRoute(client);
+
+    expect(screen.getByLabelText("Email address")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add member" }),
+    ).toBeInTheDocument();
+  });
+
+  it("submits the add member form", async () => {
+    const user = userEvent.setup();
+    const mutationSpy = vi.fn();
+    const client = createTestClient((op) => {
+      if (op.kind === "mutation") {
+        mutationSpy(op);
+        return {
+          data: {
+            addMemberToGroup: {
+              __typename: "Group" as const,
+              id: "g1",
+              members: [
+                ...groupData.members,
+                {
+                  __typename: "User" as const,
+                  id: "3",
+                  email: "new@test.com",
+                  displayName: "New User",
+                },
+              ],
+            },
+          },
+        };
+      }
+      return { data: { group: groupData } };
+    });
+
+    renderAtRoute(client);
+
+    await user.type(screen.getByLabelText("Email address"), "new@test.com");
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+
+    expect(mutationSpy).toHaveBeenCalled();
+  });
+
+  it("shows error when add member fails", async () => {
+    const user = userEvent.setup();
+    const client = createTestClient((op) => {
+      if (op.kind === "mutation") {
+        return {
+          error: new CombinedError({
+            graphQLErrors: [{ message: "no user with that email" }],
+          }),
+        };
+      }
+      return { data: { group: groupData } };
+    });
+
+    renderAtRoute(client);
+
+    await user.type(screen.getByLabelText("Email address"), "nobody@test.com");
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+
+    expect(
+      await screen.findByText(/no user with that email/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows empty state for no transactions", () => {
+    const client = createTestClient(groupHandler);
+    renderAtRoute(client);
+
+    expect(screen.getByText("No transactions yet.")).toBeInTheDocument();
+  });
+
+  it("renders transaction list", () => {
+    const groupWithTransactions = {
+      ...groupData,
+      transactions: [
+        {
+          __typename: "Transaction" as const,
+          id: "t1",
+          description: "Dinner",
+          amount: 5000,
+          paidBy: {
+            __typename: "User" as const,
+            id: "1",
+            displayName: "Test User",
+          },
+          createdAt: "2026-01-16T00:00:00Z",
+        },
+        {
+          __typename: "Transaction" as const,
+          id: "t2",
+          description: "Hotel",
+          amount: 20000,
+          paidBy: {
+            __typename: "User" as const,
+            id: "2",
+            displayName: "Other User",
+          },
+          createdAt: "2026-01-17T00:00:00Z",
+        },
+      ],
+    };
+
+    const client = createTestClient(() => ({
+      data: { group: groupWithTransactions },
+    }));
+    renderAtRoute(client);
+
+    expect(screen.getByText("Dinner")).toBeInTheDocument();
+    expect(screen.getByText("$50.00")).toBeInTheDocument();
+    expect(screen.getByText(/Paid by Test User/)).toBeInTheDocument();
+    expect(screen.getByText("Hotel")).toBeInTheDocument();
+    expect(screen.getByText("$200.00")).toBeInTheDocument();
+    expect(screen.getByText(/Paid by Other User/)).toBeInTheDocument();
   });
 });
