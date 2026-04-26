@@ -45,3 +45,49 @@ export const RefreshTokenMutation = graphql(`
     }
   }
 `);
+
+export const GroupsQuery = graphql(`
+  query Groups {
+    groups {
+      id
+      name
+      createdBy {
+        id
+        displayName
+      }
+      members {
+        id
+        displayName
+      }
+      createdAt
+    }
+  }
+`);
+
+export const GroupQuery = graphql(`
+  query Group($id: ID!) {
+    group(id: $id) {
+      id
+      name
+      createdBy {
+        id
+        displayName
+      }
+      members {
+        id
+        email
+        displayName
+      }
+      createdAt
+    }
+  }
+`);
+
+export const CreateGroupMutation = graphql(`
+  mutation CreateGroup($input: CreateGroupInput!) {
+    createGroup(input: $input) {
+      id
+      name
+    }
+  }
+`);
