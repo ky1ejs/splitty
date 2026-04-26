@@ -43,6 +43,8 @@ input CreateTransactionInput {
   description: String!
   "Amount in cents."
   amount: Int!
+  "User ID of who paid. Defaults to the authenticated user when omitted."
+  paidBy: ID
   splitBetween: [ID!]!
 }
 

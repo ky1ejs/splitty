@@ -191,8 +191,17 @@ func (r *mutationResolver) CreateTransaction(ctx context.Context, input model.Cr
 		return nil, fmt.Errorf("splitBetween must include at least one user")
 	}
 
-	// The payer is the authenticated user.
 	payerID, _ := auth.UserIDFromContext(ctx)
+	if input.PaidBy != nil {
+		payerID = *input.PaidBy
+		isMember, err := r.GroupStore.IsMember(ctx, input.GroupID, payerID)
+		if err != nil {
+			return nil, fmt.Errorf("check payer membership: %w", err)
+		}
+		if !isMember {
+			return nil, fmt.Errorf("paidBy user is not a member of this group")
+		}
+	}
 
 	nonMembers, err := r.GroupStore.AreMembers(ctx, input.GroupID, input.SplitBetween)
 	if err != nil {

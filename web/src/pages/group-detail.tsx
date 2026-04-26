@@ -3,8 +3,21 @@ import { Link, useParams } from "react-router";
 import { useMutation, useQuery } from "urql";
 import {
   AddMemberToGroupMutation,
+  CreateTransactionMutation,
   GroupQuery,
 } from "../graphql/operations";
+import { useAuth } from "../auth/auth-context";
+
+type GroupMember = {
+  id: string;
+  email: string;
+  displayName: string;
+};
+
+type GroupForForm = {
+  id: string;
+  members: ReadonlyArray<GroupMember>;
+};
 
 export function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -99,6 +112,12 @@ export function GroupDetailPage() {
       </form>
 
       <h2>Transactions</h2>
+      <h3>Add Transaction</h3>
+      <AddTransactionForm
+        group={group}
+        onCreated={() => reexecuteGroup({ requestPolicy: "network-only" })}
+      />
+
       {group.transactions.length === 0 ? (
         <p style={{ color: "#666" }}>No transactions yet.</p>
       ) : (
@@ -127,5 +146,155 @@ export function GroupDetailPage() {
         </ul>
       )}
     </div>
+  );
+}
+
+function AddTransactionForm({
+  group,
+  onCreated,
+}: {
+  group: GroupForForm;
+  onCreated: () => void;
+}) {
+  const { user } = useAuth();
+  const [createResult, createTransaction] = useMutation(
+    CreateTransactionMutation,
+  );
+
+  const initialPayer = () =>
+    user?.id && group.members.some((m) => m.id === user.id)
+      ? user.id
+      : (group.members[0]?.id ?? "");
+
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paidBy, setPaidBy] = useState<string>(initialPayer);
+  const [splitBetween, setSplitBetween] = useState<Set<string>>(
+    () => new Set(group.members.map((m) => m.id)),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  function toggleSplit(id: string) {
+    setSplitBetween((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    const trimmedDescription = description.trim();
+    if (!trimmedDescription) {
+      setError("Description is required.");
+      return;
+    }
+    const dollars = parseFloat(amount);
+    if (!Number.isFinite(dollars) || dollars <= 0) {
+      setError("Amount must be greater than zero.");
+      return;
+    }
+    if (splitBetween.size === 0) {
+      setError("Select at least one member to split between.");
+      return;
+    }
+    if (!paidBy) {
+      setError("Select who paid.");
+      return;
+    }
+
+    const cents = Math.round(dollars * 100);
+    const res = await createTransaction({
+      input: {
+        groupId: group.id,
+        description: trimmedDescription,
+        amount: cents,
+        paidBy,
+        splitBetween: Array.from(splitBetween),
+      },
+    });
+
+    if (res.error) {
+      setError(res.error.message);
+      return;
+    }
+
+    setDescription("");
+    setAmount("");
+    setPaidBy(initialPayer());
+    setSplitBetween(new Set(group.members.map((m) => m.id)));
+    onCreated();
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="txn-description">Description</label>
+        <br />
+        <input
+          id="txn-description"
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          required
+          style={{ width: "100%" }}
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="txn-amount">Amount</label>
+        <br />
+        <input
+          id="txn-amount"
+          type="number"
+          step="0.01"
+          min="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          required
+          style={{ width: "100%" }}
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="txn-paid-by">Paid by</label>
+        <br />
+        <select
+          id="txn-paid-by"
+          value={paidBy}
+          onChange={(e) => setPaidBy(e.target.value)}
+          style={{ width: "100%" }}
+        >
+          {group.members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.displayName}
+            </option>
+          ))}
+        </select>
+      </div>
+      <fieldset
+        style={{ marginBottom: 12, border: "1px solid #ccc", padding: 8 }}
+      >
+        <legend>Split between</legend>
+        {group.members.map((m) => (
+          <label key={m.id} style={{ display: "block" }}>
+            <input
+              type="checkbox"
+              checked={splitBetween.has(m.id)}
+              onChange={() => toggleSplit(m.id)}
+            />{" "}
+            {m.displayName}
+          </label>
+        ))}
+      </fieldset>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+      <button type="submit" disabled={createResult.fetching}>
+        {createResult.fetching ? "Adding..." : "Add transaction"}
+      </button>
+    </form>
   );
 }
