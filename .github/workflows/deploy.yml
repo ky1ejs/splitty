@@ -1,0 +1,32 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.backend.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: backend
+        uses: ky1ejs/check-diff-paths-action@v0.3.0
+        with:
+          paths: "^backend\\/.*"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  backend:
+    needs: check-changes
+    if: needs.check-changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only --config backend/fly.toml --dockerfile backend/Dockerfile backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

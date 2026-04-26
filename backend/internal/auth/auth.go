@@ -20,10 +20,11 @@ func withUserID(ctx context.Context, userID string) context.Context {
 }
 
 var (
-	ErrUnavailable   = errors.New("email passcode is not available")
 	ErrInvalidEmail  = errors.New("invalid email address")
 	ErrEmailRequired = errors.New("email is required")
 	ErrCodeRequired  = errors.New("code is required")
+	ErrInvalidCode   = errors.New("invalid or expired code")
+	ErrRateLimited   = errors.New("please wait before requesting another code")
 )
 
 // TokenIssuer generates access and refresh tokens for a user.
