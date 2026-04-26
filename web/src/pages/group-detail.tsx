@@ -8,7 +8,7 @@ import {
 
 export function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [result] = useQuery({
+  const [result, reexecuteGroup] = useQuery({
     query: GroupQuery,
     variables: { id: id ?? "" },
     pause: !id,
@@ -26,6 +26,7 @@ export function GroupDetailPage() {
       setAddError(res.error.message);
     } else {
       setEmail("");
+      reexecuteGroup({ requestPolicy: "network-only" });
     }
   }
 

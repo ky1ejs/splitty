@@ -118,28 +118,32 @@ describe("GroupDetailPage", () => {
   it("submits the add member form", async () => {
     const user = userEvent.setup();
     const mutationSpy = vi.fn();
+    const newMember = {
+      __typename: "User" as const,
+      id: "3",
+      email: "new@test.com",
+      displayName: "New User",
+    };
+    const updatedGroupData = {
+      ...groupData,
+      members: [...groupData.members, newMember],
+    };
+    let mutated = false;
     const client = createTestClient((op) => {
       if (op.kind === "mutation") {
         mutationSpy(op);
+        mutated = true;
         return {
           data: {
             addMemberToGroup: {
               __typename: "Group" as const,
               id: "g1",
-              members: [
-                ...groupData.members,
-                {
-                  __typename: "User" as const,
-                  id: "3",
-                  email: "new@test.com",
-                  displayName: "New User",
-                },
-              ],
+              members: updatedGroupData.members,
             },
           },
         };
       }
-      return { data: { group: groupData } };
+      return { data: { group: mutated ? updatedGroupData : groupData } };
     });
 
     renderAtRoute(client);
@@ -148,6 +152,7 @@ describe("GroupDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "Add member" }));
 
     expect(mutationSpy).toHaveBeenCalled();
+    expect(await screen.findByText("New User (new@test.com)")).toBeInTheDocument();
   });
 
   it("shows error when add member fails", async () => {

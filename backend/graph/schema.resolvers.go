@@ -150,7 +150,12 @@ func (r *mutationResolver) AddMemberToGroup(ctx context.Context, groupID string,
 		return nil, err
 	}
 
-	user, err := r.UserStore.GetByEmail(ctx, email)
+	normalized, err := auth.NormalizeEmail(email)
+	if err != nil {
+		return nil, fmt.Errorf("invalid email: %w", err)
+	}
+
+	user, err := r.UserStore.GetByEmail(ctx, normalized)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("no user with that email")
