@@ -179,7 +179,7 @@ func (r *mutationResolver) AddMemberToGroup(ctx context.Context, groupID string,
 
 // CreateTransaction is the resolver for the createTransaction field.
 func (r *mutationResolver) CreateTransaction(ctx context.Context, input model.CreateTransactionInput) (*model.Transaction, error) {
-	_, err := r.requireGroupMember(ctx, input.GroupID)
+	authUserID, err := r.requireGroupMember(ctx, input.GroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +191,8 @@ func (r *mutationResolver) CreateTransaction(ctx context.Context, input model.Cr
 		return nil, fmt.Errorf("splitBetween must include at least one user")
 	}
 
-	payerID, _ := auth.UserIDFromContext(ctx)
-	if input.PaidBy != nil {
+	payerID := authUserID
+	if input.PaidBy != nil && *input.PaidBy != authUserID {
 		payerID = *input.PaidBy
 		isMember, err := r.GroupStore.IsMember(ctx, input.GroupID, payerID)
 		if err != nil {

@@ -337,4 +337,79 @@ describe("GroupDetailPage", () => {
     expect(screen.getByText("$200.00")).toBeInTheDocument();
     expect(screen.getByText(/Paid by Other User/)).toBeInTheDocument();
   });
+
+  it("converts amount strings to cents without floating-point drift", async () => {
+    const user = userEvent.setup();
+    const mutationSpy = vi.fn();
+    renderAtRoute(makeCreateTxnClient(mutationSpy));
+
+    await user.type(screen.getByLabelText("Description"), "Tip");
+    await user.type(screen.getByLabelText("Amount"), "0.29");
+    await user.click(screen.getByRole("button", { name: "Add transaction" }));
+
+    expect(mutationSpy.mock.calls[0]![0].variables.input.amount).toBe(29);
+  });
+
+  it("includes a newly added member in the default split", async () => {
+    const user = userEvent.setup();
+    const mutationSpy = vi.fn();
+    const newMember = {
+      __typename: "User" as const,
+      id: "3",
+      email: "new@test.com",
+      displayName: "New User",
+    };
+    let groupWithNewMember = false;
+    const client = createTestClient((op) => {
+      if (op.kind === "mutation") {
+        const opName = (op.query.definitions[0] as { name?: { value: string } })
+          .name?.value;
+        if (opName === "AddMemberToGroup") {
+          groupWithNewMember = true;
+          return {
+            data: {
+              addMemberToGroup: {
+                __typename: "Group" as const,
+                id: "g1",
+                members: [...groupData.members, newMember],
+              },
+            },
+          };
+        }
+        mutationSpy(op);
+        return {
+          data: {
+            createTransaction: {
+              __typename: "Transaction" as const,
+              id: "t-new",
+            },
+          },
+        };
+      }
+      return {
+        data: {
+          group: groupWithNewMember
+            ? { ...groupData, members: [...groupData.members, newMember] }
+            : groupData,
+        },
+      };
+    });
+
+    renderAtRoute(client);
+
+    await user.type(screen.getByLabelText("Email address"), "new@test.com");
+    await user.click(screen.getByRole("button", { name: "Add member" }));
+
+    await screen.findByText("New User (new@test.com)");
+
+    await user.type(screen.getByLabelText("Description"), "Round 2");
+    await user.type(screen.getByLabelText("Amount"), "30");
+    await user.click(screen.getByRole("button", { name: "Add transaction" }));
+
+    expect(mutationSpy.mock.calls[0]![0].variables.input.splitBetween).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+  });
 });

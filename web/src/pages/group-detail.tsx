@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useMutation, useQuery } from "urql";
 import {
@@ -169,13 +169,30 @@ function AddTransactionForm({
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState<string>(initialPayer);
-  const [splitBetween, setSplitBetween] = useState<Set<string>>(
-    () => new Set(group.members.map((m) => m.id)),
+  // Track which members the user has *deselected* rather than which are selected,
+  // so newly-added group members are included by default and removed members
+  // can't linger as ghost selections.
+  const [deselectedSplit, setDeselectedSplit] = useState<Set<string>>(
+    () => new Set(),
   );
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (paidBy && !group.members.some((m) => m.id === paidBy)) {
+      setPaidBy(initialPayer());
+    }
+    // initialPayer is recreated each render but only consulted as a fallback;
+    // we only want this effect to fire when the member list (or the current
+    // selection) changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group.members, paidBy]);
+
+  const splitBetween = group.members
+    .map((m) => m.id)
+    .filter((id) => !deselectedSplit.has(id));
+
   function toggleSplit(id: string) {
-    setSplitBetween((prev) => {
+    setDeselectedSplit((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -195,12 +212,12 @@ function AddTransactionForm({
       setError("Description is required.");
       return;
     }
-    const dollars = parseFloat(amount);
-    if (!Number.isFinite(dollars) || dollars <= 0) {
+    const cents = parseDollarsToCents(amount);
+    if (cents === null || cents <= 0) {
       setError("Amount must be greater than zero.");
       return;
     }
-    if (splitBetween.size === 0) {
+    if (splitBetween.length === 0) {
       setError("Select at least one member to split between.");
       return;
     }
@@ -209,14 +226,13 @@ function AddTransactionForm({
       return;
     }
 
-    const cents = Math.round(dollars * 100);
     const res = await createTransaction({
       input: {
         groupId: group.id,
         description: trimmedDescription,
         amount: cents,
         paidBy,
-        splitBetween: Array.from(splitBetween),
+        splitBetween,
       },
     });
 
@@ -228,7 +244,7 @@ function AddTransactionForm({
     setDescription("");
     setAmount("");
     setPaidBy(initialPayer());
-    setSplitBetween(new Set(group.members.map((m) => m.id)));
+    setDeselectedSplit(new Set());
     onCreated();
   }
 
@@ -284,7 +300,7 @@ function AddTransactionForm({
           <label key={m.id} style={{ display: "block" }}>
             <input
               type="checkbox"
-              checked={splitBetween.has(m.id)}
+              checked={!deselectedSplit.has(m.id)}
               onChange={() => toggleSplit(m.id)}
             />{" "}
             {m.displayName}
@@ -297,4 +313,16 @@ function AddTransactionForm({
       </button>
     </form>
   );
+}
+
+// Parses a dollar-denominated string into integer cents without going through
+// floating-point math (e.g. "1.005" * 100 != 100.5 in JS). Returns null when
+// the input is malformed.
+function parseDollarsToCents(input: string): number | null {
+  const match = input.trim().match(/^(\d+)(?:\.(\d{1,2}))?$/);
+  if (!match) return null;
+  const dollars = parseInt(match[1]!, 10);
+  const centsPart = (match[2] ?? "").padEnd(2, "0");
+  const cents = parseInt(centsPart, 10);
+  return dollars * 100 + cents;
 }
