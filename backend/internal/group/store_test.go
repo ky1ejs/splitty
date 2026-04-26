@@ -313,6 +313,168 @@ func TestDeleteTransaction_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetByIDs(t *testing.T) {
+	store, userStore := testGroupStore(t)
+	ctx := context.Background()
+
+	creator := createTestUser(t, store, userStore)
+
+	g1, err := store.CreateGroup(ctx, "Group A", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup A: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g1.ID)
+	})
+
+	g2, err := store.CreateGroup(ctx, "Group B", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup B: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g2.ID)
+	})
+
+	// Fetch both groups in reverse order to verify ordering.
+	groups, err := store.GetByIDs(ctx, []string{g2.ID, g1.ID})
+	if err != nil {
+		t.Fatalf("GetByIDs: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	if groups[0].ID != g2.ID {
+		t.Errorf("first group ID = %q, want %q", groups[0].ID, g2.ID)
+	}
+	if groups[1].ID != g1.ID {
+		t.Errorf("second group ID = %q, want %q", groups[1].ID, g1.ID)
+	}
+}
+
+func TestGetByIDs_Empty(t *testing.T) {
+	store, _ := testGroupStore(t)
+	ctx := context.Background()
+
+	groups, err := store.GetByIDs(ctx, []string{})
+	if err != nil {
+		t.Fatalf("GetByIDs empty: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Errorf("expected 0 groups, got %d", len(groups))
+	}
+}
+
+func TestGetMembersByGroupIDs(t *testing.T) {
+	store, userStore := testGroupStore(t)
+	ctx := context.Background()
+
+	creator := createTestUser(t, store, userStore)
+	member := createTestUser(t, store, userStore)
+
+	g1, err := store.CreateGroup(ctx, "Group A", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup A: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g1.ID)
+	})
+
+	g2, err := store.CreateGroup(ctx, "Group B", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup B: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g2.ID)
+	})
+
+	// Add member to group A only.
+	if err := store.AddMember(ctx, g1.ID, member); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	result, err := store.GetMembersByGroupIDs(ctx, []string{g1.ID, g2.ID})
+	if err != nil {
+		t.Fatalf("GetMembersByGroupIDs: %v", err)
+	}
+
+	// Group A: creator + member.
+	if len(result[g1.ID]) != 2 {
+		t.Errorf("group A members = %d, want 2", len(result[g1.ID]))
+	}
+	// Group B: creator only.
+	if len(result[g2.ID]) != 1 {
+		t.Errorf("group B members = %d, want 1", len(result[g2.ID]))
+	}
+}
+
+func TestGetMembersByGroupIDs_Empty(t *testing.T) {
+	store, _ := testGroupStore(t)
+	ctx := context.Background()
+
+	result, err := store.GetMembersByGroupIDs(ctx, []string{})
+	if err != nil {
+		t.Fatalf("GetMembersByGroupIDs empty: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(result))
+	}
+}
+
+func TestGetSplitUserIDsByTransactionIDs(t *testing.T) {
+	store, userStore := testGroupStore(t)
+	ctx := context.Background()
+
+	creator := createTestUser(t, store, userStore)
+	member := createTestUser(t, store, userStore)
+
+	g, err := store.CreateGroup(ctx, "Trip", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g.ID)
+	})
+
+	if err := store.AddMember(ctx, g.ID, member); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	txn1, err := store.CreateTransaction(ctx, g.ID, "Dinner", 5000, creator, []string{creator, member})
+	if err != nil {
+		t.Fatalf("CreateTransaction 1: %v", err)
+	}
+
+	txn2, err := store.CreateTransaction(ctx, g.ID, "Lunch", 2000, creator, []string{creator})
+	if err != nil {
+		t.Fatalf("CreateTransaction 2: %v", err)
+	}
+
+	result, err := store.GetSplitUserIDsByTransactionIDs(ctx, []string{txn1.ID, txn2.ID})
+	if err != nil {
+		t.Fatalf("GetSplitUserIDsByTransactionIDs: %v", err)
+	}
+
+	if len(result[txn1.ID]) != 2 {
+		t.Errorf("txn1 splits = %d, want 2", len(result[txn1.ID]))
+	}
+	if len(result[txn2.ID]) != 1 {
+		t.Errorf("txn2 splits = %d, want 1", len(result[txn2.ID]))
+	}
+}
+
+func TestGetSplitUserIDsByTransactionIDs_Empty(t *testing.T) {
+	store, _ := testGroupStore(t)
+	ctx := context.Background()
+
+	result, err := store.GetSplitUserIDsByTransactionIDs(ctx, []string{})
+	if err != nil {
+		t.Fatalf("GetSplitUserIDsByTransactionIDs empty: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(result))
+	}
+}
+
 func TestListByGroup(t *testing.T) {
 	store, userStore := testGroupStore(t)
 	ctx := context.Background()

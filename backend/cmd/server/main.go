@@ -9,6 +9,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/kylejs/splitty/backend/graph"
+	"github.com/kylejs/splitty/backend/graph/dataloader"
 	"github.com/kylejs/splitty/backend/internal/auth"
 	"github.com/kylejs/splitty/backend/internal/config"
 	"github.com/kylejs/splitty/backend/internal/cors"
@@ -82,10 +83,11 @@ func main() {
 	}
 
 	var queryHandler http.Handler = srv
+	queryHandler = dataloader.Middleware(userStore, groupStore)(queryHandler)
 	if tokenService != nil {
-		queryHandler = auth.Middleware(tokenService)(srv)
+		queryHandler = auth.Middleware(tokenService)(queryHandler)
 	} else {
-		queryHandler = auth.DevMiddleware()(srv)
+		queryHandler = auth.DevMiddleware()(queryHandler)
 	}
 	mux.Handle("/query", queryHandler)
 

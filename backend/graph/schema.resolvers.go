@@ -12,6 +12,7 @@ import (
 	"log"
 
 	pgx "github.com/jackc/pgx/v5"
+	"github.com/kylejs/splitty/backend/graph/dataloader"
 	"github.com/kylejs/splitty/backend/graph/model"
 	"github.com/kylejs/splitty/backend/internal/auth"
 	"github.com/kylejs/splitty/backend/internal/group"
@@ -19,13 +20,17 @@ import (
 
 // Members is the resolver for the members field.
 func (r *groupResolver) Members(ctx context.Context, obj *model.Group) ([]*model.User, error) {
-	ids, err := r.GroupStore.GetMembers(ctx, obj.ID)
+	loaders := dataloader.For(ctx)
+	ids, err := loaders.GroupMembersLoader.Load(ctx, obj.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load members: %w", err)
 	}
-	records, err := r.UserStore.GetByIDs(ctx, ids)
+	if len(ids) == 0 {
+		return []*model.User{}, nil
+	}
+	records, err := loaders.UserLoader.LoadAll(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("load members: %w", err)
+		return nil, fmt.Errorf("load member users: %w", err)
 	}
 	users := make([]*model.User, len(records))
 	for i, u := range records {
@@ -36,7 +41,7 @@ func (r *groupResolver) Members(ctx context.Context, obj *model.Group) ([]*model
 
 // CreatedBy is the resolver for the createdBy field.
 func (r *groupResolver) CreatedBy(ctx context.Context, obj *model.Group) (*model.User, error) {
-	u, err := r.UserStore.GetByID(ctx, obj.CreatedByID)
+	u, err := dataloader.For(ctx).UserLoader.Load(ctx, obj.CreatedByID)
 	if err != nil {
 		return nil, fmt.Errorf("load group creator: %w", err)
 	}
@@ -258,7 +263,7 @@ func (r *queryResolver) Group(ctx context.Context, id string) (*model.Group, err
 
 // Group is the resolver for the group field.
 func (r *transactionResolver) Group(ctx context.Context, obj *model.Transaction) (*model.Group, error) {
-	g, err := r.GroupStore.GetByID(ctx, obj.GroupID)
+	g, err := dataloader.For(ctx).GroupLoader.Load(ctx, obj.GroupID)
 	if err != nil {
 		return nil, fmt.Errorf("load transaction group: %w", err)
 	}
@@ -267,7 +272,7 @@ func (r *transactionResolver) Group(ctx context.Context, obj *model.Transaction)
 
 // PaidBy is the resolver for the paidBy field.
 func (r *transactionResolver) PaidBy(ctx context.Context, obj *model.Transaction) (*model.User, error) {
-	u, err := r.UserStore.GetByID(ctx, obj.PaidByID)
+	u, err := dataloader.For(ctx).UserLoader.Load(ctx, obj.PaidByID)
 	if err != nil {
 		return nil, fmt.Errorf("load payer: %w", err)
 	}
@@ -276,13 +281,17 @@ func (r *transactionResolver) PaidBy(ctx context.Context, obj *model.Transaction
 
 // SplitBetween is the resolver for the splitBetween field.
 func (r *transactionResolver) SplitBetween(ctx context.Context, obj *model.Transaction) ([]*model.User, error) {
-	ids, err := r.GroupStore.GetSplitUserIDs(ctx, obj.ID)
+	loaders := dataloader.For(ctx)
+	ids, err := loaders.TransactionSplitsLoader.Load(ctx, obj.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load split users: %w", err)
 	}
-	records, err := r.UserStore.GetByIDs(ctx, ids)
+	if len(ids) == 0 {
+		return []*model.User{}, nil
+	}
+	records, err := loaders.UserLoader.LoadAll(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("load split users: %w", err)
+		return nil, fmt.Errorf("load split user records: %w", err)
 	}
 	users := make([]*model.User, len(records))
 	for i, u := range records {
