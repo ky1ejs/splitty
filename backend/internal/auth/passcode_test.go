@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,8 @@ func (m *mockTokenIssuer) IssueTokens(ctx context.Context, userID, email string)
 }
 
 type passcodeRow struct {
+	id         string
+	email      string
 	codeHash   string
 	expiresAt  time.Time
 	consumedAt time.Time
@@ -36,6 +39,8 @@ type passcodeRow struct {
 
 type memPasscodeStore struct {
 	mu      sync.Mutex
+	rows    []*passcodeRow
+	nextID  int
 	byEmail map[string][]*passcodeRow
 }
 
@@ -43,14 +48,40 @@ func newMemStore() *memPasscodeStore {
 	return &memPasscodeStore{byEmail: map[string][]*passcodeRow{}}
 }
 
-func (s *memPasscodeStore) Create(_ context.Context, email, codeHash string, expiresAt time.Time) error {
+func (s *memPasscodeStore) Create(_ context.Context, email, codeHash string, expiresAt time.Time) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.byEmail[email] = append(s.byEmail[email], &passcodeRow{
+	s.nextID++
+	id := fmt.Sprintf("row-%d", s.nextID)
+	row := &passcodeRow{
+		id:        id,
+		email:     email,
 		codeHash:  codeHash,
 		expiresAt: expiresAt,
 		createdAt: time.Now(),
-	})
+	}
+	s.rows = append(s.rows, row)
+	s.byEmail[email] = append(s.byEmail[email], row)
+	return id, nil
+}
+
+func (s *memPasscodeStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, r := range s.rows {
+		if r.id == id {
+			s.rows = append(s.rows[:i], s.rows[i+1:]...)
+			break
+		}
+	}
+	for email, rows := range s.byEmail {
+		for i, r := range rows {
+			if r.id == id {
+				s.byEmail[email] = append(rows[:i], rows[i+1:]...)
+				break
+			}
+		}
+	}
 	return nil
 }
 
@@ -116,7 +147,7 @@ func newSvc(users UserStore, tokens TokenIssuer, store PasscodeStore, sender *ca
 	if sender == nil {
 		sender = &captureSender{}
 	}
-	return NewPasscodeService(users, tokens, store, sender)
+	return NewPasscodeService(users, tokens, store, sender, "test-pepper")
 }
 
 // extractCode pulls the 6-digit code out of the email body our service writes.
@@ -174,6 +205,42 @@ func TestSendPasscode_RateLimited(t *testing.T) {
 	err := svc.SendPasscode(context.Background(), "alice@example.com")
 	if !errors.Is(err, ErrRateLimited) {
 		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+}
+
+func TestSendPasscode_RollsBackOnSendFailure(t *testing.T) {
+	store := newMemStore()
+	sender := &captureSender{err: errors.New("smtp down")}
+	svc := newSvc(happyStore(), happyTokens(), store, sender)
+
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err == nil {
+		t.Fatal("expected send error")
+	}
+	// Row should have been rolled back so caller is not rate-limited.
+	if last, _ := store.LastIssuedAt(context.Background(), "alice@example.com"); !last.IsZero() {
+		t.Errorf("expected no row after send failure, got LastIssuedAt=%v", last)
+	}
+	// Retry should succeed (no rate limit) once sender recovers.
+	sender.err = nil
+	if err := svc.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+}
+
+func TestVerifyPasscode_PepperMismatch(t *testing.T) {
+	// A code created under pepper A must not verify under pepper B, even if
+	// the underlying plaintext matches. Guards against a swapped/missing pepper.
+	store := newMemStore()
+	sender := &captureSender{}
+	svcA := NewPasscodeService(happyStore(), happyTokens(), store, sender, "pepper-A")
+	if err := svcA.SendPasscode(context.Background(), "alice@example.com"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	code := extractCode(sender.body)
+
+	svcB := NewPasscodeService(happyStore(), happyTokens(), store, sender, "pepper-B")
+	if _, err := svcB.VerifyPasscode(context.Background(), "alice@example.com", code); !errors.Is(err, ErrInvalidCode) {
+		t.Errorf("expected ErrInvalidCode under different pepper, got %v", err)
 	}
 }
 

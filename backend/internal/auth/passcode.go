@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,27 +27,35 @@ const (
 // In all environments, codes are generated, hashed, and persisted with a
 // short TTL. The Sender controls delivery: in development, a LogSender writes
 // the code to logs; in production, MailgunSender delivers the email.
+//
+// Codes are HMAC-SHA256'd with a server-side pepper before persistence.
+// SHA-256 alone over a 6-digit space is trivially brute-forceable from a DB
+// dump; HMAC with a secret pepper means a DB leak alone is not enough to
+// recover live codes.
 type PasscodeService struct {
 	users  UserStore
 	tokens TokenIssuer
 	store  PasscodeStore
 	sender email.Sender
+	pepper []byte
 	now    func() time.Time
 }
 
 // NewPasscodeService creates a PasscodeService.
-func NewPasscodeService(users UserStore, tokens TokenIssuer, store PasscodeStore, sender email.Sender) *PasscodeService {
+func NewPasscodeService(users UserStore, tokens TokenIssuer, store PasscodeStore, sender email.Sender, pepper string) *PasscodeService {
 	return &PasscodeService{
 		users:  users,
 		tokens: tokens,
 		store:  store,
 		sender: sender,
+		pepper: []byte(pepper),
 		now:    time.Now,
 	}
 }
 
 // SendPasscode generates a 6-digit code, persists its hash, and dispatches
-// the plaintext code via the configured Sender.
+// the plaintext code via the configured Sender. If the send fails, the
+// persisted row is rolled back so the user is not rate-limited from retrying.
 func (s *PasscodeService) SendPasscode(ctx context.Context, rawEmail string) error {
 	emailAddr, err := NormalizeEmail(rawEmail)
 	if err != nil {
@@ -67,7 +76,8 @@ func (s *PasscodeService) SendPasscode(ctx context.Context, rawEmail string) err
 		return fmt.Errorf("generate code: %w", err)
 	}
 
-	if err := s.store.Create(ctx, emailAddr, hashCode(code), now.Add(passcodeTTL)); err != nil {
+	id, err := s.store.Create(ctx, emailAddr, s.hashCode(code), now.Add(passcodeTTL))
+	if err != nil {
 		return err
 	}
 
@@ -75,6 +85,9 @@ func (s *PasscodeService) SendPasscode(ctx context.Context, rawEmail string) err
 	body := fmt.Sprintf("Your Splitty sign-in code is %s. It expires in %d minutes.", code, int(passcodeTTL.Minutes()))
 	if err := s.sender.Send(ctx, emailAddr, subject, body); err != nil {
 		slog.Error("send passcode email", "email", emailAddr, "err", err)
+		if delErr := s.store.Delete(ctx, id); delErr != nil {
+			slog.Error("rollback passcode after send failure", "email", emailAddr, "err", delErr)
+		}
 		return fmt.Errorf("send email: %w", err)
 	}
 	return nil
@@ -91,7 +104,7 @@ func (s *PasscodeService) VerifyPasscode(ctx context.Context, rawEmail, code str
 		return nil, ErrCodeRequired
 	}
 
-	matched, err := s.store.ConsumeMatching(ctx, emailAddr, hashCode(code), s.now())
+	matched, err := s.store.ConsumeMatching(ctx, emailAddr, s.hashCode(code), s.now())
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +150,9 @@ func generatePasscode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-func hashCode(code string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(code)))
-	return hex.EncodeToString(sum[:])
+// hashCode returns the HMAC-SHA256 of the (trimmed) code using the service's pepper.
+func (s *PasscodeService) hashCode(code string) string {
+	mac := hmac.New(sha256.New, s.pepper)
+	mac.Write([]byte(strings.TrimSpace(code)))
+	return hex.EncodeToString(mac.Sum(nil))
 }

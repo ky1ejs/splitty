@@ -71,7 +71,15 @@ func main() {
 		emailSender = email.LogSender{}
 	}
 
-	passcodeService := auth.NewPasscodeService(userStore, tokenIssuer, passcodeStore, emailSender)
+	pepper := cfg.PasscodePepper
+	if pepper == "" {
+		if cfg.Env == config.EnvProduction {
+			log.Fatal("PASSCODE_PEPPER is required in production")
+		}
+		pepper = "splitty-dev-pepper"
+	}
+
+	passcodeService := auth.NewPasscodeService(userStore, tokenIssuer, passcodeStore, emailSender, pepper)
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
 		Resolvers: &graph.Resolver{

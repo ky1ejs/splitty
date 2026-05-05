@@ -12,8 +12,11 @@ import (
 
 // PasscodeStore persists hashed passcodes for the email-passcode auth flow.
 type PasscodeStore interface {
-	// Create stores a new passcode for the email.
-	Create(ctx context.Context, email, codeHash string, expiresAt time.Time) error
+	// Create stores a new passcode for the email and returns its row id.
+	Create(ctx context.Context, email, codeHash string, expiresAt time.Time) (string, error)
+	// Delete removes the row with the given id. Used to roll back a Create
+	// when subsequent email delivery fails.
+	Delete(ctx context.Context, id string) error
 	// LastIssuedAt returns the created_at of the most recently issued passcode
 	// for the email, or zero time if none exists. Used for rate limiting.
 	LastIssuedAt(ctx context.Context, email string) (time.Time, error)
@@ -33,14 +36,24 @@ func NewPgPasscodeStore(pool *pgxpool.Pool) *PgPasscodeStore {
 	return &PgPasscodeStore{pool: pool}
 }
 
-func (s *PgPasscodeStore) Create(ctx context.Context, email, codeHash string, expiresAt time.Time) error {
-	_, err := s.pool.Exec(ctx,
+func (s *PgPasscodeStore) Create(ctx context.Context, email, codeHash string, expiresAt time.Time) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx,
 		`INSERT INTO email_passcodes (email, code_hash, expires_at)
-		 VALUES ($1, $2, $3)`,
+		 VALUES ($1, $2, $3)
+		 RETURNING id`,
 		email, codeHash, expiresAt,
-	)
+	).Scan(&id)
 	if err != nil {
-		return fmt.Errorf("create passcode: %w", err)
+		return "", fmt.Errorf("create passcode: %w", err)
+	}
+	return id, nil
+}
+
+func (s *PgPasscodeStore) Delete(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM email_passcodes WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete passcode: %w", err)
 	}
 	return nil
 }

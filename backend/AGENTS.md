@@ -63,10 +63,11 @@ Environment variables:
 | `MAILGUN_API_KEY` | Mailgun API key (required in production) | — |
 | `MAILGUN_DOMAIN` | Mailgun sending domain, e.g. `mg.example.com` (required in production) | — |
 | `MAILGUN_FROM` | From address used for passcode emails (required in production) | — |
+| `PASSCODE_PEPPER` | Server-side secret used to HMAC stored passcode hashes (required in production) | a fixed dev value |
 
 In development the email sender is replaced with a `LogSender` that writes
 the passcode to standard logs, so Mailgun credentials are not required
-locally.
+locally. `PASSCODE_PEPPER` likewise falls back to a fixed dev value.
 
 Local Postgres URL: `postgres://postgres@localhost:5432/splitty_dev?sslmode=disable`
 
