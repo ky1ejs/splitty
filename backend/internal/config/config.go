@@ -12,6 +12,10 @@ type Config struct {
 	DatabaseURL       string
 	JWTPrivateKey     string
 	CORSAllowedOrigin string
+	MailgunAPIKey     string
+	MailgunDomain     string
+	MailgunFrom       string
+	PasscodePepper    string
 }
 
 func Load() Config {
@@ -29,5 +33,9 @@ func Load() Config {
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		JWTPrivateKey:     os.Getenv("JWT_PRIVATE_KEY"),
 		CORSAllowedOrigin: corsOrigin,
+		MailgunAPIKey:     os.Getenv("MAILGUN_API_KEY"),
+		MailgunDomain:     os.Getenv("MAILGUN_DOMAIN"),
+		MailgunFrom:       os.Getenv("MAILGUN_FROM"),
+		PasscodePepper:    os.Getenv("PASSCODE_PEPPER"),
 	}
 }

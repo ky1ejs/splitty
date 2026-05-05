@@ -69,9 +69,6 @@ func (r *mutationResolver) SignInWithApple(ctx context.Context, identityToken st
 // SendPasscode is the resolver for the sendPasscode field.
 func (r *mutationResolver) SendPasscode(ctx context.Context, email string) (*model.SendPasscodeResponse, error) {
 	if err := r.PasscodeService.SendPasscode(ctx, email); err != nil {
-		if errors.Is(err, auth.ErrUnavailable) {
-			return nil, fmt.Errorf("email passcode is not available")
-		}
 		return nil, err
 	}
 	return &model.SendPasscodeResponse{Success: true}, nil
@@ -81,9 +78,6 @@ func (r *mutationResolver) SendPasscode(ctx context.Context, email string) (*mod
 func (r *mutationResolver) VerifyPasscode(ctx context.Context, email string, code string) (*model.AuthResponse, error) {
 	result, err := r.PasscodeService.VerifyPasscode(ctx, email, code)
 	if err != nil {
-		if errors.Is(err, auth.ErrUnavailable) {
-			return nil, fmt.Errorf("email passcode is not available")
-		}
 		return nil, err
 	}
 	return &model.AuthResponse{
