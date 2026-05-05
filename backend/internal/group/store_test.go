@@ -274,6 +274,71 @@ func TestCreateTransaction_OK(t *testing.T) {
 	}
 }
 
+func TestCreateTransaction_PayerIsMember(t *testing.T) {
+	store, userStore := testGroupStore(t)
+	ctx := context.Background()
+
+	creator := createTestUser(t, store, userStore)
+	member := createTestUser(t, store, userStore)
+
+	g, err := store.CreateGroup(ctx, "Trip", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g.ID)
+	})
+
+	if err := store.AddMember(ctx, g.ID, member); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	txn, err := store.CreateTransaction(ctx, g.ID, "Cab", 1500, member, []string{creator, member})
+	if err != nil {
+		t.Fatalf("CreateTransaction: %v", err)
+	}
+	if txn.PaidBy != member {
+		t.Errorf("PaidBy = %q, want %q", txn.PaidBy, member)
+	}
+}
+
+func TestAreMembers(t *testing.T) {
+	store, userStore := testGroupStore(t)
+	ctx := context.Background()
+
+	creator := createTestUser(t, store, userStore)
+	member := createTestUser(t, store, userStore)
+	outsider := createTestUser(t, store, userStore)
+
+	g, err := store.CreateGroup(ctx, "Trip", creator)
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	t.Cleanup(func() {
+		store.pool.Exec(context.Background(), `DELETE FROM groups WHERE id = $1`, g.ID)
+	})
+
+	if err := store.AddMember(ctx, g.ID, member); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	nonMembers, err := store.AreMembers(ctx, g.ID, []string{creator, member})
+	if err != nil {
+		t.Fatalf("AreMembers all-members: %v", err)
+	}
+	if len(nonMembers) != 0 {
+		t.Errorf("expected no non-members, got %v", nonMembers)
+	}
+
+	nonMembers, err = store.AreMembers(ctx, g.ID, []string{creator, outsider})
+	if err != nil {
+		t.Fatalf("AreMembers with outsider: %v", err)
+	}
+	if len(nonMembers) != 1 || nonMembers[0] != outsider {
+		t.Errorf("expected [%s] non-members, got %v", outsider, nonMembers)
+	}
+}
+
 func TestDeleteTransaction_OK(t *testing.T) {
 	store, userStore := testGroupStore(t)
 	ctx := context.Background()

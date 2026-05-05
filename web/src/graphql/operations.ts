@@ -114,3 +114,11 @@ export const CreateGroupMutation = graphql(`
     }
   }
 `);
+
+export const CreateTransactionMutation = graphql(`
+  mutation CreateTransaction($input: CreateTransactionInput!) {
+    createTransaction(input: $input) {
+      id
+    }
+  }
+`);
